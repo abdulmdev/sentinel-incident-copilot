@@ -1,0 +1,16 @@
+sequenceDiagram
+  autonumber
+  participant AG as agent
+  participant SEC as Spring Security
+  participant TR as MCP transport (servlet thread)
+  participant TOOL as search_runbooks handler
+  participant KS as KnowledgeSearch
+  AG->>SEC: POST /mcp tools/call · Bearer tool token
+  SEC->>SEC: verify signature + exp · require SCOPE_knowledge:read
+  SEC->>TR: authenticated request
+  TR->>TR: context extractor: principal → tenant_id
+  TR->>TOOL: call(transport context, arguments)
+  Note right of TOOL: tenant read from the transport context,<br/>never a thread-local (execution may hop threads)
+  TOOL->>KS: hybrid search (tenant, query, limit ≤ 8)
+  KS-->>TOOL: hits (RLS-bound)
+  TOOL-->>AG: one JSON array: docId, title, heading, text

@@ -1,0 +1,37 @@
+sequenceDiagram
+  autonumber
+  participant U as Console
+  participant GW as gateway
+  participant AG as agent (any replica)
+  participant MR as mcp-remediation
+  participant R as Redis
+  participant S as service ops API
+  participant MO as mcp-observability
+  participant DB as Postgres
+  U->>GW: POST /incidents/{id}/decision {approved}
+  GW->>AG: GET view (proposed action, target)
+  alt approved and action ≠ escalate
+    GW->>GW: mint capability (aud sentinel-remediation, action, target, incident, approver, jti, 5 min)
+  end
+  GW->>AG: decision (reviewer = JWT subject) + X-Sentinel-Remediation-Token
+  AG->>DB: load checkpoint thread tenant:incident
+  alt status is not AWAITING_APPROVAL
+    AG-->>GW: 409 (decisions are single-use)
+  else approved, executable
+    AG->>MR: tools/call <action>(target) · Bearer capability
+    MR->>MR: verify signature, aud, scope, expiry, action, target
+    MR->>R: SET NX jti (Redis down → refuse)
+    MR->>S: POST /ops/<action>
+    S-->>MR: result
+    MR-->>AG: executed + audit log line
+    loop up to 6 probes, 5 s apart
+      AG->>MO: probe_service(target)
+      MO-->>AG: success rate, p95
+    end
+    AG->>DB: checkpoint RESOLVED or REMEDIATION_FAILED + timeline + postmortem
+    AG-->>GW: view
+  else rejected / escalate
+    AG-->>GW: CLOSED_NO_ACTION / ESCALATED + postmortem
+  end
+  GW->>DB: UPDATE incident (status, timeline, TTM) · INSERT remediation_audit
+  GW-->>U: view

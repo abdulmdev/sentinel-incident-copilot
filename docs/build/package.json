@@ -1,0 +1,17 @@
+{
+  "name": "sentinel-docs-build",
+  "private": true,
+  "type": "module",
+  "description": "Renders handbook diagrams (Mermaid -> SVG), captures screenshots, and builds the single-file HTML/PDF handbook.",
+  "scripts": {
+    "diagrams": "node diagrams.mjs",
+    "screenshots": "node screenshots.mjs",
+    "book": "node book.mjs",
+    "all": "node diagrams.mjs && node book.mjs"
+  },
+  "dependencies": {
+    "@mermaid-js/mermaid-cli": "^12.0.0",
+    "marked": "^18.0.14",
+    "puppeteer-core": "^25.12.0"
+  }
+}

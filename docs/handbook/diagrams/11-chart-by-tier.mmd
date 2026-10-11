@@ -1,0 +1,13 @@
+---
+config:
+  xyChart:
+    showDataLabel: true
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#2f5bd3, #1f7a4d"
+---
+xychart-beta
+  title "Current baseline: remediation accuracy by difficulty tier (%)"
+  x-axis ["clean (30)", "noisy (30)", "red_herring (16)", "subtle (4)", "injection (12)", "missing_data (20)"]
+  y-axis "accuracy %" 0 --> 100
+  bar [100, 100, 100, 100, 100, 60]

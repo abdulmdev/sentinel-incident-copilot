@@ -1,0 +1,11 @@
+flowchart TB
+  Q[query] --> EMB[embed query]
+  Q --> LEX["stemmed lexemes<br/>OR-joined tsquery"]
+  EMB --> VEC["vector search · top 20<br/>cosine via HNSW"]
+  LEX --> KW["keyword search · top 20<br/>ts_rank_cd via GIN"]
+  VEC & KW --> RRF["Reciprocal Rank Fusion<br/>score = Σ 1 / (60 + rank)"]
+  RRF --> TOP[top k chunks]
+  subgraph tx["one transaction · RLS bound to tenant"]
+    VEC
+    KW
+  end

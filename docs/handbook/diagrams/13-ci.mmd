@@ -1,0 +1,10 @@
+flowchart LR
+  PR([push / pull request]) --> J1[java · mvn verify<br/>gateway, ingestion]
+  PR --> J2[python · pytest<br/>agent + Postgres, mcp-observability, mcp-remediation]
+  PR --> J3[eval-gate<br/>regenerate · run --check · held-out]
+  PR --> J4[docs<br/>check_docs.py]
+  PR --> J5[web<br/>next build]
+  PR --> J6[deploy-config<br/>helm lint · kubeconform · terraform validate<br/>agent holds no signing secret]
+  J1 & J2 & J5 & J6 --> J7[kind-e2e<br/>install chart · incident · approve → RESOLVED<br/>NetworkPolicy incl. remediation]
+  J7 & J3 --> J8["images (main only)<br/>multi-arch → GHCR"]
+  MAN([manual dispatch]) --> J9[llm-eval<br/>Claude · --max-usd]

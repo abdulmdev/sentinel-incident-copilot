@@ -1,0 +1,19 @@
+flowchart LR
+  subgraph clients[Any MCP client]
+    AG[Sentinel agent]
+    IDE[IDE / Claude Desktop]
+  end
+  subgraph server["mcp-observability · stateless streamable HTTP /mcp"]
+    T1[list_services]
+    T2[get_recent_deploys]
+    T3[get_error_logs<br/>grouped by message + counts]
+    T4[get_service_metrics]
+    T5[probe_service<br/>verification traffic]
+  end
+  AG & IDE -->|"Bearer tool token<br/>ES256 · telemetry:read"| server
+  T2 --> D[(deploy history<br/>chaos-lab /chaos/deploys)]
+  T3 --> L[(logs<br/>chaos-lab /chaos/logs)]
+  T4 --> M[(metrics<br/>chaos-lab /metrics)]
+  T5 --> W[(live requests<br/>chaos-lab /work)]
+  NOTE["Production: same contracts in front of<br/>Loki / Elasticsearch, the deploy system, Prometheus"]
+  server -.- NOTE

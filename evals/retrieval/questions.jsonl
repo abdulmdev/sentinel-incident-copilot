@@ -1,0 +1,20 @@
+{"q": "checkout is throwing 5xx right after a deploy, what should I do?", "relevant": ["checkout-rollback", "postmortem-2026-08-14-checkout-npe"]}
+{"q": "how do I roll back checkout to the previous build", "relevant": ["checkout-rollback"]}
+{"q": "deployctl rollback", "relevant": ["checkout-rollback"]}
+{"q": "should I try a forward fix or revert during a SEV1?", "relevant": ["checkout-rollback", "postmortem-2026-08-14-checkout-npe"]}
+{"q": "NullPointerException in PaymentClient.charge", "relevant": ["postmortem-2026-08-14-checkout-npe"]}
+{"q": "has the payment client broken checkout before?", "relevant": ["postmortem-2026-08-14-checkout-npe"]}
+{"q": "timeout acquiring DB connection", "relevant": ["db-connection-pool"]}
+{"q": "requests hang for 30 seconds then fail with 500, database related", "relevant": ["db-connection-pool"]}
+{"q": "how big can I make the hikari pool", "relevant": ["db-connection-pool"]}
+{"q": "find which code path is leaking connections", "relevant": ["db-connection-pool"]}
+{"q": "pods keep getting OOMKilled", "relevant": ["jvm-memory-leak"]}
+{"q": "heap usage grows forever and GC pauses are long", "relevant": ["jvm-memory-leak"]}
+{"q": "how to take a heap dump", "relevant": ["jvm-memory-leak"]}
+{"q": "upstream returned 503 from pricing-api", "relevant": ["pricing-api-dependency"]}
+{"q": "checkout slow but its CPU and memory look fine", "relevant": ["pricing-api-dependency"]}
+{"q": "can we serve stale prices during an outage", "relevant": ["pricing-api-dependency"]}
+{"q": "consumer group is falling behind on orders events", "relevant": ["kafka-consumer-lag"]}
+{"q": "certificate has expired errors everywhere at once", "relevant": ["tls-certificate-expiry"]}
+{"q": "who do I page if primary on-call doesn't answer", "relevant": ["oncall-escalation-policy"]}
+{"q": "what counts as a SEV1", "relevant": ["oncall-escalation-policy"]}

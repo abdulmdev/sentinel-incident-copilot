@@ -1,0 +1,14 @@
+flowchart TB
+  T[Bearer token] --> P["parse WITHOUT trusting:<br/>read iss, alg"]
+  P --> Q{iss?}
+  Q -->|"= gateway issuer"| O["verify ES256 only<br/>with the gateway's key ring (by kid)"]
+  Q -->|"= OIDC issuer"| K["verify RS256 only<br/>with the IdP's JWKS"]
+  Q -->|"none / sentinel-dev, alg HS256,<br/>dev issuer enabled"| D[verify HS256<br/>dev secret]
+  Q -->|anything else| X[401 untrusted issuer]
+  O --> OA{aud is a service audience?}
+  K --> KA{aud ∋ sentinel-api?}
+  D --> DA{aud is NOT a service audience?}
+  OA -->|yes| S[service principal<br/>→ /mcp, alerts webhook]
+  KA -->|yes| U[user principal<br/>→ /api/v1/*]
+  DA -->|yes| U
+  OA & KA & DA -->|no| X

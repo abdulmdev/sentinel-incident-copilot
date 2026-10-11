@@ -1,0 +1,23 @@
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant A as /api/auth/* (BFF server)
+  participant K as Keycloak (IdP)
+  participant P as /api/proxy/* (BFF server)
+  participant GW as gateway
+  B->>A: GET /api/auth/login
+  A-->>B: 302 to IdP authorize (state, PKCE challenge) + httpOnly tx cookie (Lax)
+  B->>K: sign in (username + password, at the IdP only)
+  K-->>B: 302 /api/auth/callback?code&state
+  B->>A: GET /api/auth/callback (tx cookie)
+  A->>A: check state
+  A->>K: back channel: code + PKCE verifier + client secret
+  K-->>A: access, refresh, id tokens
+  A-->>B: Set-Cookie (httpOnly, Strict) + meta refresh to /
+  Note over B: JavaScript never sees a token
+  B->>P: GET /api/proxy/api/v1/incidents (cookie)
+  P->>P: allow-list · refresh if expired (rotates cookies)
+  P->>GW: Authorization: Bearer access token (RS256)
+  GW->>GW: verify via IdP JWKS · iss · aud sentinel-api · tenant_id
+  GW-->>P: 200 JSON
+  P-->>B: 200 JSON

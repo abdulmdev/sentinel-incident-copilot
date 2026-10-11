@@ -1,0 +1,231 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      llm_eval:
+        description: "Also run the RCA benchmark against Claude (uses the ANTHROPIC_API_KEY secret, costs money)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java:
+    strategy:
+      matrix:
+        service: [gateway-service, ingestion-service]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # verify = unit tests + *IT integration tests (Testcontainers pgvector; Docker is preinstalled on the runner)
+      - run: mvn -B verify
+        working-directory: ${{ matrix.service }}
+
+  python:
+    strategy:
+      matrix:
+        project: [agent-service, mcp-tools/observability, mcp-tools/remediation]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sentinel
+          POSTGRES_PASSWORD: sentinel
+          POSTGRES_DB: sentinel
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sentinel" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Prepare checkpoint schema (normally created by ingestion-service's Flyway V3)
+        if: matrix.project == 'agent-service'
+        run: |
+          PGPASSWORD=sentinel psql -h localhost -U sentinel -d sentinel -c \
+            "CREATE ROLE sentinel_app LOGIN PASSWORD 'sentinel_app'; CREATE SCHEMA langgraph AUTHORIZATION sentinel_app;"
+      - run: uv run --frozen pytest -q
+        working-directory: ${{ matrix.project }}
+        env:
+          SENTINEL_TEST_PG_DSN: postgresql://sentinel_app:sentinel_app@localhost:5432/sentinel?options=-csearch_path%3Dlanggraph
+
+  eval-gate:
+    # Offline, deterministic RCA benchmark: 100 replayed incidents through the real agent graph.
+    # Fails the build if any metric regresses past evals/rca/thresholds.json.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Scorer tests
+        run: uv run --frozen --project agent-service pytest -q evals/rca
+      - name: Benchmark is reproducible from its generator
+        run: |
+          uv run --frozen --project agent-service python evals/rca/generate.py
+          git diff --exit-code evals/rca/scenarios.jsonl
+      - name: RCA benchmark (baseline) + regression gate
+        run: uv run --frozen --project agent-service python evals/rca/run.py --check
+      - name: Held-out set
+        run: uv run --frozen --project agent-service python evals/rca/run.py --scenarios scenarios-holdout.jsonl --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rca-report
+          path: |
+            evals/rca/REPORT.md
+            evals/rca/results/
+
+  docs:
+    # Documentation is part of the change: links resolve, and every migration, env var and metric is documented.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check_docs.py
+
+  web:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: web } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "24", cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: npm ci
+      - run: npm run build   # includes the TypeScript type check
+
+  deploy-config:
+    # Chart, manifests and infrastructure must be valid before anything ships.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Helm lint + strict schema validation for every overlay
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          H=deploy/helm/sentinel
+          helm lint deploy/helm/sentinel-deps
+          for overlay in "" "-f $H/values-kind.yaml" "-f $H/values-aws.yaml"; do
+            helm lint $H $overlay
+            helm template t $H $overlay | ./kubeconform -strict -summary -skip ExternalSecret
+          done
+      - name: Least privilege - who may hold which secret (signing keys only in the gateway)
+        run: |
+          H=deploy/helm/sentinel
+          helm template t $H --set secrets.create=true --set secrets.values.signingKeys=x \
+            --set secrets.values.dbAppPassword=x --set secrets.values.dbAdminPassword=x \
+            | python3 scripts/check_chart_secrets.py --prod
+          helm template t $H -f $H/values-kind.yaml | python3 scripts/check_chart_secrets.py
+      - name: Terraform fmt + validate
+        working-directory: deploy/terraform/aws
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+
+  kind-e2e:
+    # The real chart on a real (local) Kubernetes cluster: migrations hook, NetworkPolicies, an incident end to end.
+    needs: [java, python, web, deploy-config]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21", cache: maven }
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with: { cluster_name: sentinel, config: deploy/kind/cluster.yaml }
+      - name: Build images and install
+        run: |
+          mkdir -p .tools && ln -s "$(command -v kind)" .tools/kind && ln -s "$(command -v helm)" .tools/helm
+          scripts/kind-up.sh
+      - name: Smoke test (seed knowledge, break checkout, open incident, approve, verify recovery)
+        run: |
+          GATEWAY_URL=http://localhost:18080 python3 scripts/seed_knowledge.py acme
+          kubectl -n sentinel exec deploy/sentinel-checkout -- python -c "import urllib.request,json; urllib.request.urlopen(urllib.request.Request('http://localhost:8000/chaos/fault', json.dumps({'type':'db_pool_exhaustion'}).encode(), {'Content-Type':'application/json'}))"
+          for i in $(seq 1 30); do kubectl -n sentinel exec deploy/sentinel-checkout -- python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/work')" 2>/dev/null || true; done
+          TOKEN=$(python3 scripts/dev_token.py ci@acme acme)
+          OPENED=$(curl -sf -X POST localhost:18080/api/v1/incidents -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' -d '{"service":"checkout","summary":"ci smoke","severity":"SEV3"}')
+          echo "$OPENED" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["status"]=="AWAITING_APPROVAL", v["status"]'
+          ID=$(echo "$OPENED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["incident"]["id"])')
+          # Closing the loop: approval mints a capability, the adapter executes, the agent verifies recovery.
+          curl -sf -X POST localhost:18080/api/v1/incidents/$ID/decision -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' -d '{"approved":true,"note":"ci"}' \
+            | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["status"]=="RESOLVED", (v["status"], v.get("execution"), v.get("verification"))'
+
+      - name: NetworkPolicy is enforced (console pod must not reach the agent or the remediation adapter)
+        run: |
+          ! kubectl -n sentinel exec deploy/sentinel-web -- node -e \
+            "fetch('http://sentinel-agent:8000/healthz',{signal:AbortSignal.timeout(3000)}).then(()=>process.exit(0)).catch(()=>process.exit(1))"
+          ! kubectl -n sentinel exec deploy/sentinel-web -- node -e \
+            "fetch('http://sentinel-mcp-remediation:8300/healthz',{signal:AbortSignal.timeout(3000)}).then(()=>process.exit(0)).catch(()=>process.exit(1))"
+      - if: failure()
+        run: kubectl -n sentinel get pods; kubectl -n sentinel get events --sort-by=.lastTimestamp | tail -30
+
+  images:
+    # Publish on main: one tag per commit (immutable in ECR/GHCR), multi-arch for Graviton nodes.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [kind-e2e, eval-gate]
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    strategy:
+      matrix:
+        include:
+          - { name: gateway, context: gateway-service, java: true }
+          - { name: ingestion, context: ingestion-service, java: true }
+          - { name: agent, context: agent-service }
+          - { name: mcp-observability, context: mcp-tools/observability }
+          - { name: mcp-remediation, context: mcp-tools/remediation }
+          - { name: chaos-lab, context: chaos-lab/service }
+          - { name: web, context: web }
+    steps:
+      - uses: actions/checkout@v4
+      - if: matrix.java
+        uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21", cache: maven }
+      - if: matrix.java
+        name: Build jar + fetch embedding model
+        run: |
+          (cd ${{ matrix.context }} && mvn -B -q package -DskipTests)
+          curl -fsSL -o ${{ matrix.context }}/target/model.onnx \
+            https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/sentinel-${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  llm-eval:
+    if: github.event_name == 'workflow_dispatch' && inputs.llm_eval
+    needs: eval-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: RCA benchmark (Claude) + gate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "::warning::ANTHROPIC_API_KEY secret not set; skipping"; exit 0; fi
+          uv run --frozen --project agent-service python evals/rca/run.py --mode llm --max-usd 80 --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rca-report-llm
+          path: evals/rca/REPORT.md

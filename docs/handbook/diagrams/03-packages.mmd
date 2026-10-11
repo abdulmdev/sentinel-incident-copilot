@@ -1,0 +1,68 @@
+flowchart TB
+  subgraph config
+    SC[SecurityConfig<br/>filter chain · JWT decoder]
+    SP[SentinelProperties]
+    AE[ApiErrors<br/>exception → HTTP status]
+  end
+  subgraph tenant
+    TN[Tenants.of jwt]
+    RLF[TenantRateLimitFilter]
+    RL{{RateLimiter}}
+    RRL[RedisRateLimiter<br/>Lua token bucket]
+    TRL[TenantRateLimiter<br/>in-memory fallback]
+  end
+  subgraph incident
+    IC[IncidentController]
+    IS[IncidentService<br/>record · investigate · decide]
+    IR[IncidentRepository]
+    AC[AgentClient<br/>HTTP/1.1 · retries]
+  end
+  subgraph alert
+    ALC[AlertController]
+    ALS[AlertService]
+    ALR[AlertLinkRepository<br/>advisory lock · dedupe · correlate]
+  end
+  subgraph remediation
+    RT[RemediationTokens<br/>capabilities]
+    RA[RemediationAuditRepository]
+  end
+  subgraph knowledge
+    KC[KnowledgeController]
+    KS[KnowledgeSearch<br/>vector · keyword · hybrid]
+    RRF[ReciprocalRankFusion]
+    TDR[TenantDocumentRetriever]
+  end
+  subgraph ask
+    ASKC[AskController<br/>RAG advisor]
+    SCACHE[SemanticCache]
+  end
+  subgraph identity
+    SK[SigningKeys<br/>ES256 key ring]
+    ST[ServiceTokens<br/>sole minter]
+    RJ[RoutingJwtDecoder<br/>issuer → verifier]
+    JW[JwksController]
+  end
+  subgraph integration
+    INC2[IntegrationController]
+    ITR[IntegrationTokenRepository]
+  end
+  subgraph mcp
+    RMS[RunbookMcpServer<br/>search_runbooks]
+    TT[ToolTokens]
+  end
+  SC --> RLF --> RL
+  RL --> RRL
+  RRL -. fallback .-> TRL
+  IC --> IS & IR & TN
+  IS --> AC & TT & RT & RA & IR & ALR
+  ALC --> ALS --> IS & ALR
+  KC --> KS --> RRF
+  TDR --> KS
+  ASKC --> TDR & SCACHE
+  RMS --> KS
+  SC --> RJ --> SK
+  JW --> SK
+  ST --> SK
+  TT & RT --> ST
+  INC2 --> ST & ITR
+  SC --> ITR

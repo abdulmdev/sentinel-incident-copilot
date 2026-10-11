@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels: {{- include "sentinel.labels" . | nindent 4 }}
+data:
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}{{ with .Values.postgres.sslmode }}?sslmode={{ . }}{{ end }}"
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: {{ .Values.kafka.bootstrapServers | quote }}
+  SPRING_DATA_REDIS_HOST: {{ .Values.redis.host | quote }}
+  SPRING_FLYWAY_ENABLED: "false"          # migrations run in the hook Job, not in serving pods
+  SENTINEL_AGENT_URL: "http://{{ .Release.Name }}-agent:8000"
+  SENTINEL_MCP_OBSERVABILITY_URL: "http://{{ .Release.Name }}-mcp-observability:8200/mcp"
+  SENTINEL_MCP_REMEDIATION_URL: "http://{{ .Release.Name }}-mcp-remediation:8300/mcp"
+  SENTINEL_REPLAY_STORE: "redis://{{ .Values.redis.host }}:6379/0"   # single-use capabilities (fails closed)
+  SENTINEL_MCP_KNOWLEDGE_URL: "http://{{ .Release.Name }}-gateway:8080/mcp"
+  GATEWAY_URL: "http://{{ .Release.Name }}-gateway:8080"
+  # Identity: service tokens are ES256 from the gateway; everyone verifies them via its JWKS.
+  SENTINEL_ISSUER: "http://{{ .Release.Name }}-gateway:8080"
+  SENTINEL_DEV_TOKENS: {{ .Values.auth.devTokens | quote }}
+  SENTINEL_SIGNING_REQUIRED: {{ .Values.auth.signing.requireConfigured | quote }}
+  {{- with .Values.auth.oidc.issuer }}
+  SENTINEL_OIDC_ISSUER: {{ . | quote }}
+  OIDC_ISSUER: {{ . | quote }}
+  OIDC_CLIENT_ID: {{ $.Values.auth.oidc.clientId | quote }}
+  SENTINEL_OIDC_AUDIENCE: {{ $.Values.auth.oidc.audience | quote }}
+  {{- end }}
+  {{- with .Values.auth.oidc.jwksUri }}
+  SENTINEL_OIDC_JWKS_URI: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.auth.publicUrl }}
+  PUBLIC_URL: {{ . | quote }}
+  {{- end }}
+  SENTINEL_LLM_PROVIDER: {{ .Values.llm.provider | quote }}
+  {{- /* Only when set: an empty OLLAMA_BASE_URL overrides the default and breaks Spring AI's Ollama client */}}
+  {{- with .Values.llm.ollamaBaseUrl }}
+  OLLAMA_BASE_URL: {{ . | quote }}
+  {{- end }}
+  SENTINEL_OLLAMA_MODEL: {{ .Values.llm.ollamaModel | quote }}
+  {{- range $k, $v := .Values.extraConfig }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+  {{- with .Values.tracing.otlpEndpoint }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ . | quote }}
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "{{ . }}/v1/traces"
+  {{- end }}
+  {{- if .Values.chaosLab.enabled }}
+  OBSERVED_SERVICES: "{{ range $i, $s := .Values.chaosLab.services }}{{ if $i }},{{ end }}{{ $s }}=http://{{ $.Release.Name }}-{{ $s }}:8000{{ end }}"
+  OPS_SERVICES: "{{ range $i, $s := .Values.chaosLab.services }}{{ if $i }},{{ end }}{{ $s }}=http://{{ $.Release.Name }}-{{ $s }}:8000{{ end }}"
+  {{- else if .Values.remediation.targets }}
+  OPS_SERVICES: "{{ $first := true }}{{ range $s, $url := .Values.remediation.targets }}{{ if not $first }},{{ end }}{{ $first = false }}{{ $s }}={{ $url }}{{ end }}"
+  {{- end }}

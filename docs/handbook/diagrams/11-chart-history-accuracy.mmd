@@ -1,0 +1,13 @@
+---
+config:
+  xyChart:
+    showDataLabel: true
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#2f5bd3, #1f7a4d"
+---
+xychart-beta
+  title "Remediation accuracy by benchmark run (%)"
+  x-axis ["v1 rules", "v2 deploy window", "v2 held-out", "v2 + guardrails (112)", "held-out (112)"]
+  y-axis "accuracy %" 0 --> 100
+  bar [76, 92, 92, 92.9, 92.9]

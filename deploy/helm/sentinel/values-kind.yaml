@@ -1,0 +1,33 @@
+# Local kind cluster (scripts/kind-up.sh). Images are built locally and loaded into the node.
+image: { registry: sentinel, prefix: "", tag: dev, pullPolicy: Never }   # sentinel/<component>:dev
+postgres: { host: postgres }
+kafka: { bootstrapServers: kafka:9092 }
+redis: { host: redis }
+llm: { provider: anthropic }   # no key = rule baseline (and /ask -> 503); for gemma4: provider ollama, ollamaBaseUrl http://host.docker.internal:11434
+secrets:
+  create: true
+  values:   # dev-only values, matching the sentinel-deps chart and scripts/dev_token.py
+    jwtSecret: dev-only-secret-change-me-0123456789abcdef
+    dbAppPassword: sentinel_app
+    dbAdminPassword: sentinel
+chaosLab: { enabled: true }
+# No IdP in the kind cluster: dev user tokens (CI smoke test, console dev login) and an ephemeral
+# signing key (one gateway replica). Service tokens are still ES256 and verified via the JWKS.
+auth: { devTokens: true, signing: { requireConfigured: false } }
+networkPolicy: { externalAccess: [web, gateway] }   # NodePorts on the host; everything else stays internal
+components:
+  gateway:
+    secrets: [jwtSecret, dbAppPassword, anthropicApiKey]   # dev issuer; ephemeral signing key
+    replicas: 1
+    autoscaling: { enabled: false }
+    service: { type: NodePort, nodePort: 30080 }
+    resources: { requests: { cpu: 100m, memory: 512Mi }, limits: { memory: 1Gi } }
+  ingestion: { replicas: 1, resources: { requests: { cpu: 100m, memory: 512Mi }, limits: { memory: 1Gi } } }
+  agent: { replicas: 1, autoscaling: { enabled: false } }
+  mcp-observability: { replicas: 1 }
+  mcp-remediation: { replicas: 1 }
+  web:
+    secrets: [jwtSecret]                                    # dev sign-in
+    replicas: 1
+    service: { type: NodePort, nodePort: 30300 }
+    env: { SENTINEL_DEV_LOGIN: "true" }

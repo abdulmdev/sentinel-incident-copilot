@@ -1,0 +1,11 @@
+flowchart TB
+  Q([POST /api/v1/ask]) --> E[embed question<br/>local ONNX, 384-d]
+  E --> KV[knowledge version<br/>count · max updated_at · md5 of hashes]
+  KV --> LK{nearest cache entry<br/>same tenant, model, version<br/>younger than 24 h}
+  LK -->|similarity ≥ 0.95| HIT[return cached answer<br/>cached: true<br/>no retrieval, no LLM]
+  LK -->|miss| RAG[RetrievalAugmentationAdvisor]
+  RAG --> RET[TenantDocumentRetriever<br/>hybrid top 5 · fails closed without tenant]
+  RET --> PR[grounded prompt<br/>numbered excerpts · cite as n<br/>excerpts are data, not instructions]
+  PR --> LLM[LLM: Claude or Ollama]
+  LLM --> ST[store in cache]
+  ST --> MISS[return answer<br/>cached: false]

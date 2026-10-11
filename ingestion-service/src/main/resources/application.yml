@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: sentinel-ingestion
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/sentinel}
+    username: sentinel_app
+    password: ${SENTINEL_DB_APP_PASSWORD:sentinel_app}
+  flyway:
+    # Migrations run as the admin role; the service itself runs as the RLS-restricted app role.
+    user: ${SENTINEL_DB_ADMIN_USER:sentinel}
+    password: ${SENTINEL_DB_ADMIN_PASSWORD:sentinel}
+    placeholders:
+      app_password: ${SENTINEL_DB_APP_PASSWORD:sentinel_app}
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+  ai:
+    model:
+      embedding: transformers  # local all-MiniLM-L6-v2 (384-dim); no API key, no per-call cost
+    embedding:
+      transformer:
+        onnx:
+          model-uri: ${SENTINEL_EMBEDDING_MODEL_URI:https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx}
+        tokenizer:
+          uri: ${SENTINEL_TOKENIZER_URI:classpath:/onnx/all-MiniLM-L6-v2/tokenizer.json}   # bundled in spring-ai-transformers: no GitHub fetch at startup
+        cache:
+          directory: ${SENTINEL_MODEL_CACHE:${java.io.tmpdir}/sentinel-models}
+
+server:
+  port: 8090
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
+---
+spring:
+  config:
+    activate:
+      on-profile: migrate
+  main:
+    web-application-type: none
+  ai:
+    model:
+      embedding: none
+  kafka:
+    listener:
+      auto-startup: false

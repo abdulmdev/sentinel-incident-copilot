@@ -1,0 +1,11 @@
+flowchart LR
+  F1[bad_deploy] --> S1["deploy record 1.5.0<br/>ERROR NullPointerException in PaymentClient.charge<br/>alert HighErrorRatio"] --> A1[rollback]
+  F2[db_pool_exhaustion] --> S2["ERROR timeout acquiring DB connection<br/>db_pool_in_use = 20<br/>alerts DbPoolSaturated + HighErrorRatio → 1 incident"] --> A2[increase_pool]
+  F3[memory_leak] --> S3["WARN GC pause exceeded threshold<br/>memory_mb rising<br/>alert MemoryGrowth"] --> A3[restart]
+  F4[errors] --> S4["ERROR upstream returned 503<br/>alert HighErrorRatio"] --> A4[failover]
+  F5[latency] --> S5["WARN slow upstream call<br/>alert HighLatencyP95"] --> A5[failover]
+  F6[downstream 5xx] --> S6["ERROR downstream failure<br/>alert HighErrorRatio"] --> A6[escalate]
+  classDef fault fill:#fdecea,stroke:#b42318,color:#1d1d1b
+  classDef act fill:#e7f5ee,stroke:#1f7a4d,color:#1d1d1b
+  class F1,F2,F3,F4,F5,F6 fault
+  class A1,A2,A3,A4,A5,A6 act

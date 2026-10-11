@@ -1,0 +1,13 @@
+---
+config:
+  xyChart:
+    showDataLabel: true
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#2f5bd3"
+---
+xychart-beta
+  title "Requests per incident, before vs after fixes found by tracing"
+  x-axis ["agent→MCP before", "agent→MCP after", "gateway /mcp before", "gateway /mcp after", "human-budget hits before", "after"]
+  y-axis "requests" 0 --> 55
+  bar [50, 26, 19, 7, 20, 0]

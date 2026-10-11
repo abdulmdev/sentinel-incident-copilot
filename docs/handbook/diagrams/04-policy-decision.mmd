@@ -1,0 +1,11 @@
+flowchart TB
+  A[proposed action, target] --> E{action = escalate?}
+  E -->|yes| PASS[allowed]
+  E -->|no| T{target investigated?}
+  T -->|no, but mentions exactly one service| MAP[map to that service<br/>event target_normalized] --> T2
+  T -->|no| BLOCK1[escalate · target never investigated]
+  T -->|yes| T2{action = rollback?}
+  T2 -->|no| PASS
+  T2 -->|yes| D{"a running deploy of target with<br/>0 ≤ opened_at − deployed ≤ 30 min?<br/>(rollbacks and rolled-back builds don't count)"}
+  D -->|yes, or time unparseable| PASS
+  D -->|no deploy evidence, none running, or too old| BLOCK2[escalate · no recent deploy<br/>runbook: roll back only deploy-correlated incidents]

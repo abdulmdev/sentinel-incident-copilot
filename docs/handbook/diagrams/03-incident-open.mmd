@@ -1,0 +1,13 @@
+flowchart TB
+  S([POST /api/v1/incidents]) --> V{valid body?}
+  V -->|no| E400[400]
+  V --> T[tenant = JWT tenant_id<br/>id = random UUID]
+  T --> C[INSERT incident<br/>status INVESTIGATING<br/>opened_by = JWT sub]
+  C --> M[mint tool token<br/>15 min · knowledge:read]
+  M --> A[AgentClient.open<br/>payload + traceparent + tool token header]
+  A -->|network error| RT{retry ≤ 2<br/>200 ms × 2}
+  RT -->|still failing| F[mark FAILED] --> E503[503]
+  RT -->|recovered| OK
+  A -->|409 / 4xx| F2[mark FAILED] --> PASS[status passed through]
+  A -->|200 view| OK[UPDATE status,<br/>proposed action, RCA]
+  OK --> R([200 view])

@@ -1,0 +1,15 @@
+flowchart LR
+  REQ[HTTP request] --> BE[BearerTokenAuthenticationFilter<br/>verify HS256 JWT]
+  BE --> RLF[TenantRateLimitFilter<br/>bucket = tenant · tenant:agent · tenant:alerts]
+  RLF -->|over limit| R429[429 + Retry-After: 1]
+  RLF --> AZ{AuthorizationFilter}
+  AZ -->|/actuator/health, /actuator/prometheus| PUB[permit all]
+  AZ -->|/mcp| SC{has SCOPE_knowledge:read?}
+  AZ -->|/api/v1/alerts/**| AL{"SCOPE_alerts:write<br/>and aud ∋ sentinel-alerts?"}
+  AZ -->|everything else| AU{"authenticated and aud ∌<br/>sentinel-mcp · sentinel-alerts ·<br/>sentinel-remediation?"}
+  SC -->|no| F403[403]
+  AL -->|no| F403
+  AU -->|no| F403
+  SC -->|yes| MCP[MCP transport<br/>tenant → transport context]
+  AL -->|yes| WH[Alert webhook<br/>tenant = Tenants.of jwt]
+  AU -->|yes| CTRL[Controllers<br/>tenant = Tenants.of jwt]

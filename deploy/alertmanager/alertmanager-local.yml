@@ -1,0 +1,18 @@
+# Sends alerts to Sentinel's webhook (scripts/dev-local.sh: gateway on the host).
+# The bearer is a per-tenant integration token (aud sentinel-alerts, scope alerts:write) minted by
+# scripts/dev_token.py --integration; it is accepted on the alerts webhook only.
+route:
+  receiver: sentinel
+  group_by: [alertname, service]
+  group_wait: 5s          # demo-fast; Sentinel deduplicates repeats by fingerprint anyway
+  group_interval: 30s
+  repeat_interval: 10m
+receivers:
+  - name: sentinel
+    webhook_configs:
+      - url: http://host.docker.internal:8080/api/v1/alerts/alertmanager
+        send_resolved: true    # resolution is recorded on the incident (alert_resolved_at)
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/token/integration.jwt

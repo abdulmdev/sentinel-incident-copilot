@@ -1,0 +1,19 @@
+stateDiagram-v2
+  [*] --> investigator
+  investigator --> tools: tool calls requested, within budget
+  investigator --> triage: done, cost cap, or no tool calls
+  tools --> investigator: within budget
+  tools --> triage: step cap reached
+  triage --> rca
+  rca --> approval: guardrails applied<br/>status AWAITING_APPROVAL
+  approval --> execute: approved action (REMEDIATING)
+  approval --> postmortem: rejected or escalate
+  execute --> verify: executed with the capability
+  execute --> postmortem: no/refused capability, adapter error
+  verify --> postmortem: RESOLVED or REMEDIATION_FAILED
+  postmortem --> [*]
+  note right of approval
+    Graph pauses here.
+    State is checkpointed in Postgres;
+    any replica can resume hours later.
+  end note

@@ -1,0 +1,7 @@
+flowchart TB
+  X[executed: true] --> P[probe_service target, 20 requests<br/>concurrent · 3 s per-request cap]
+  P --> H{success ≥ 95%<br/>and p95 < 1 s?}
+  H -->|yes| R[RESOLVED<br/>TTM = verified_at − opened_at]
+  H -->|no| A{attempts left?<br/>default 6}
+  A -->|yes| W[wait 5 s] --> P
+  A -->|no| F[REMEDIATION_FAILED<br/>incident stays open · alert stays linked]

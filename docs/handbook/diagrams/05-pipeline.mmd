@@ -1,0 +1,12 @@
+flowchart LR
+  E[Kafka record] --> P{parse JSON}
+  P -->|malformed| X[InvalidDocumentException<br/>→ DLT, no retry]
+  P --> V{"validate tenantId, docId,<br/>title, content"}
+  V -->|invalid| X
+  V --> H["hash = sha256(title + content)"]
+  H --> C{already indexed<br/>with this hash?}
+  C -->|yes| U[UNCHANGED · no cost]
+  C -->|no| CH[MarkdownChunker<br/>1200 chars · 150 overlap]
+  CH --> EM["embed batch<br/>heading + text → 384-d"]
+  EM --> R[one transaction:<br/>upsert document<br/>delete old chunks<br/>insert new chunks]
+  R --> M[metrics · log indexed]

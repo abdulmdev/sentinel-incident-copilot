@@ -1,0 +1,100 @@
+erDiagram
+  tenants ||--o{ knowledge_documents : owns
+  tenants ||--o{ ask_cache : owns
+  knowledge_documents ||--o{ knowledge_chunks : "split into"
+  incidents ||--o{ alert_links : "opened or joined by"
+  incidents ||--o{ remediation_audit : "executed as"
+  integration_tokens {
+    text jti PK "token id only, never the token"
+    text tenant_id "RLS key"
+    text kind
+    text name
+    text created_by
+    timestamptz expires_at
+    timestamptz revoked_at
+    timestamptz last_used_at
+  }
+  tenants {
+    text id PK
+    text name
+  }
+  incidents {
+    uuid id PK
+    text tenant_id "RLS key"
+    text service
+    text summary
+    text severity
+    text status
+    text proposed_action
+    jsonb rca
+    text opened_by
+    text reviewer
+    text source "console or alertmanager"
+    text alert_fingerprint
+    timestamptz opened_at "alert startsAt"
+    timestamptz proposed_at
+    timestamptz decided_at
+    timestamptz executed_at
+    timestamptz verified_at
+    timestamptz alert_resolved_at
+    jsonb execution
+    jsonb verification
+    numeric time_to_mitigate_s
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  alert_links {
+    text tenant_id PK "RLS key"
+    text fingerprint PK "one active per tenant"
+    uuid incident_id PK
+    text alertname
+    boolean active
+    int fire_count
+    timestamptz first_seen
+    timestamptz last_seen
+    timestamptz resolved_at
+  }
+  remediation_audit {
+    bigint id PK
+    text tenant_id "RLS key"
+    uuid incident_id
+    text action
+    text target
+    text approved_by
+    text capability_jti
+    boolean executed
+    boolean verified
+    text outcome
+    text error
+    timestamptz created_at
+  }
+  knowledge_documents {
+    text tenant_id PK "RLS key"
+    text doc_id PK
+    text source
+    text title
+    text content_hash
+    timestamptz updated_at
+  }
+  knowledge_chunks {
+    bigint id PK
+    text tenant_id "RLS key"
+    text doc_id FK
+    int chunk_index
+    text heading
+    text content
+    vector embedding "384-d, HNSW"
+    tsvector tsv "generated, GIN"
+  }
+  ask_cache {
+    bigint id PK
+    text tenant_id FK "RLS key"
+    text question
+    vector embedding "384-d, HNSW"
+    text answer
+    jsonb citations
+    text model
+    text knowledge_version
+    int hits
+    timestamptz created_at
+  }

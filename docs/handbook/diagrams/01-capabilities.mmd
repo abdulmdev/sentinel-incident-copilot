@@ -1,0 +1,16 @@
+flowchart LR
+  AL([Alert fires<br/>Prometheus → Alertmanager]) --> O[Incident opens itself<br/>deduplicated · correlated]
+  O --> B[Investigate<br/>MCP tools: deploys, logs,<br/>metrics, runbooks]
+  B --> C[Diagnose<br/>triage + ranked root causes<br/>with citations]
+  C --> D[Guard<br/>validate citations,<br/>policy interlocks]
+  D --> E{Human<br/>approval}
+  E -->|approve| X[Execute once<br/>single-use capability<br/>via deploy adapter]
+  X --> V{Verify<br/>real traffic}
+  V -->|healthy| F[RESOLVED<br/>time to mitigate]
+  V -->|not healthy| FF[REMEDIATION_FAILED<br/>back to a human]
+  E -->|reject| G[Closed, no action]
+  F & FF & G --> PM[Postmortem with timeline]
+  K[(Team knowledge<br/>runbooks, postmortems)] -.grounds.-> B
+  K -.grounds.-> Q[Ask: grounded answers<br/>with citations]
+  classDef human fill:#fff4d6,stroke:#9a6200,color:#1d1d1b
+  class E human

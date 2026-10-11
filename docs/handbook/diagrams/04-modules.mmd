@@ -1,0 +1,15 @@
+flowchart LR
+  MAIN[main.py<br/>FastAPI · lifespan · metrics] --> GRAPH[graph.py<br/>state machine · budgets · prompts<br/>execute · verify · timeline]
+  MAIN --> AUTH[auth.py<br/>gateway token · tenant binding]
+  AUTH --> GK[gateway_keys.py<br/>ES256 via JWKS]
+  AUTH --> TEN[tenancy.py<br/>CURRENT_TENANT]
+  MAIN --> CP[checkpoint.py<br/>Postgres with RLS, or memory]
+  CP --> TEN
+  MAIN --> TBX[toolbox.py<br/>MCP discovery + cache<br/>remediation tools per capability]
+  MAIN --> TEL[telemetry.py<br/>OpenTelemetry]
+  GRAPH --> LLM[llm.py<br/>providers · structured output · cost]
+  GRAPH --> HEU[heuristics.py<br/>rules baseline]
+  GRAPH --> GR[guardrails.py<br/>PII · injection · citations · policy]
+  GRAPH --> EV[evidence.py<br/>tool output → evidence]
+  GRAPH --> MOD[models.py<br/>schemas]
+  GR --> HEU

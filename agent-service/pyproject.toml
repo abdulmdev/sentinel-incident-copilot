@@ -1,0 +1,35 @@
+[project]
+name = "sentinel-agent"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.28",
+    "pydantic>=2.9",
+    "prometheus-client>=0.21",
+    "langgraph>=0.6",
+    "langchain-anthropic>=0.3",
+    "langchain-mcp-adapters>=0.3",
+    "langgraph-checkpoint-postgres>=3.1",
+    "psycopg[binary,pool]>=3.2",
+    "mcp>=1.20,<2",  # langchain-mcp-adapters 0.3 is not compatible with mcp 2.x yet
+    "langchain-ollama>=0.3",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+    "pyjwt[crypto]>=2.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "respx>=0.22",
+]
+
+[tool.pytest.ini_options]
+markers = ["real_auth: exercise gateway → agent authentication (no override)"]
+testpaths = ["tests"]
+asyncio_mode = "auto"

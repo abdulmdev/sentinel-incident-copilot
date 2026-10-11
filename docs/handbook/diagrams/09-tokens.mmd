@@ -1,0 +1,14 @@
+flowchart LR
+  U([user]) -->|OIDC code + PKCE| KC[(Keycloak / IdP)]
+  KC -->|"RS256 access token<br/>tenant_id · roles · aud sentinel-api"| W[console BFF]
+  W -->|user token| API["/api/v1/*"]
+  AM([Alertmanager]) -->|"integration token (revocable)<br/>ES256 · aud sentinel-alerts"| ALR["/api/v1/alerts/**"]
+  API --> GW[gateway<br/>the only service-token issuer<br/>ES256 key ring]
+  ALR --> GW
+  GW -->|"agent-call token, 60 s, per request"| AG[agent]
+  GW -->|"tool token, 15 min"| AG
+  GW -->|"capability at approval, 5 min, once"| AG
+  AG -->|tool token| MCP["/mcp (gateway) · mcp-observability"]
+  AG -->|capability| MR[remediation adapter]
+  J[("/.well-known/jwks.json<br/>public keys")] -. verify .-> AG & MCP & MR
+  GW --- J

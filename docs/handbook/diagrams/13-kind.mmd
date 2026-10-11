@@ -1,0 +1,21 @@
+flowchart TB
+  HOST([host: localhost:13000 console · :18080 API]) --> NP
+  subgraph kind["kind cluster 'sentinel' · namespace sentinel"]
+    NP[NodePorts 30300 / 30080]
+    subgraph rel1["Helm release: sentinel"]
+      WEB[web] --> GW[gateway] --> AG[agent] --> MO[mcp-observability] --> CK[checkout] --> INV[inventory]
+      AG -->|capability| MR[mcp-remediation] --> CK
+      ING[ingestion]
+      JOB["migrate Job<br/>(pre-install hook)"]
+    end
+    subgraph rel2["Helm release: sentinel-deps (dev only)"]
+      PG[(postgres-0<br/>pgvector)]
+      KF[(kafka-0)]
+      RD[(redis)]
+    end
+    NP --> WEB & GW
+    GW & ING & AG & JOB --> PG
+    GW & ING --> KF
+    GW & MR --> RD
+  end
+  NPOL["NetworkPolicy: default deny + allow-list<br/>web→gateway ✓ · web→agent ✗ · web→mcp ✗ · web→remediation ✗<br/>agent→remediation ✓ · remediation→chaos-lab ✓"] -.- rel1

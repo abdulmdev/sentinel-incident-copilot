@@ -1,0 +1,29 @@
+target/
+.venv/
+__pycache__/
+*.pyc
+.env
+.idea/
+.vscode/
+node_modules/
+.DS_Store
+.models/
+.tools/
+.pytest_cache/
+
+# documentation build
+docs/build/node_modules/
+
+# local runtime output
+.logs/
+web/.next/
+web/next-env.d.ts
+*.partial.jsonl
+*.tsbuildinfo
+
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log

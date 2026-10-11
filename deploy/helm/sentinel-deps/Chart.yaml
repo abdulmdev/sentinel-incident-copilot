@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sentinel-deps
+description: DEV ONLY - single-replica Postgres (pgvector), Kafka (KRaft) and Redis for local clusters. Production uses RDS, MSK and ElastiCache (deploy/terraform/aws).
+type: application
+version: 0.1.0

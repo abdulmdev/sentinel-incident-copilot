@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sentinel
+description: Agentic incident-response copilot (gateway, ingestion, agent, MCP tools, console)
+type: application
+version: 0.6.0
+appVersion: "0.6.0"

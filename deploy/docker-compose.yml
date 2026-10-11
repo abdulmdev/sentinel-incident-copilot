@@ -1,0 +1,212 @@
+name: sentinel
+
+# Default `docker compose up` starts the system plus Jaeger (traces, http://localhost:16686).
+# Optional: --profile observability adds Prometheus + Grafana (http://localhost:3001, dashboard "Sentinel").
+# LLM: SENTINEL_LLM_PROVIDER=anthropic (needs ANTHROPIC_API_KEY) or ollama (host Ollama). Unset: rule baseline.
+
+x-java-env: &java-env
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sentinel
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+  SENTINEL_DB_APP_PASSWORD: ${SENTINEL_DB_APP_PASSWORD:-sentinel_app}
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+
+x-llm-env: &llm-env
+  SENTINEL_LLM_PROVIDER: ${SENTINEL_LLM_PROVIDER:-anthropic}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+  SENTINEL_OLLAMA_MODEL: ${SENTINEL_OLLAMA_MODEL:-gemma4:latest}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel
+      POSTGRES_DB: sentinel
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      interval: 5s
+      retries: 10
+
+  kafka:
+    image: apache/kafka:3.8.0
+    ports: ["9092:9092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:19092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 6
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      retries: 20
+
+  # --- Sentinel services ---
+  ingestion:
+    build: ../ingestion-service
+    environment:
+      <<: *java-env
+      SENTINEL_DB_ADMIN_USER: sentinel        # Flyway migrates as admin; the service runs as sentinel_app
+      SENTINEL_DB_ADMIN_PASSWORD: sentinel
+    volumes:
+      - onnx-cache:/tmp                       # keeps the downloaded embedding model across restarts
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+
+  gateway:
+    build: ../gateway-service
+    environment:
+      <<: [*java-env, *llm-env]
+      SPRING_DATA_REDIS_HOST: redis
+      SENTINEL_JWT_SECRET: ${SENTINEL_JWT_SECRET:-dev-only-secret-change-me-0123456789abcdef}
+      SENTINEL_DEV_TOKENS: "true"                       # dev user tokens (scripts); users also via Keycloak
+      SENTINEL_ISSUER: http://gateway:8080              # iss of service tokens; others fetch its JWKS here
+      SENTINEL_OIDC_ISSUER: http://localhost:8180/realms/sentinel
+      SENTINEL_OIDC_JWKS_URI: http://keycloak:8080/realms/sentinel/protocol/openid-connect/certs
+      SENTINEL_AGENT_URL: http://agent:8000
+    volumes:
+      - onnx-cache:/tmp
+    ports: ["8080:8080"]
+    depends_on:
+      ingestion: { condition: service_started }   # ingestion owns the schema migrations
+      agent: { condition: service_started }
+      redis: { condition: service_started }
+
+  agent:
+    build: ../agent-service
+    environment:
+      <<: *llm-env
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      SENTINEL_CHECKPOINT_DSN: postgresql://sentinel_app:${SENTINEL_DB_APP_PASSWORD:-sentinel_app}@postgres:5432/sentinel?options=-csearch_path%3Dlanggraph
+      SENTINEL_MCP_OBSERVABILITY_URL: http://mcp-observability:8200/mcp
+      SENTINEL_MCP_KNOWLEDGE_URL: http://gateway:8080/mcp
+      SENTINEL_MCP_REMEDIATION_URL: http://mcp-remediation:8300/mcp
+      SENTINEL_ISSUER: http://gateway:8080              # verifies the gateway's per-call tokens (JWKS)
+    ports: ["8000:8000"]
+    depends_on:
+      ingestion: { condition: service_started }   # Flyway creates the checkpoint schema
+      mcp-observability: { condition: service_started }
+
+  mcp-observability:
+    build: ../mcp-tools/observability
+    environment:
+      OBSERVED_SERVICES: checkout=http://checkout:8000,inventory=http://inventory:8000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      SENTINEL_ISSUER: http://gateway:8080              # tool tokens required on /mcp
+    ports: ["8200:8200"]
+
+  # Deploy-tool adapter: executes an approved remediation, once, with the capability minted at approval.
+  mcp-remediation:
+    build: ../mcp-tools/remediation
+    environment:
+      OPS_SERVICES: checkout=http://checkout:8000,inventory=http://inventory:8000
+      SENTINEL_ISSUER: http://gateway:8080          # verifies capabilities with the gateway's public keys (no secret)
+      SENTINEL_REPLAY_STORE: redis://redis:6379/0   # single-use capabilities; fails closed if Redis is down
+    ports: ["8300:8300"]
+    depends_on: [redis]
+
+  # --- chaos-lab: demo microservices that we deliberately break ---
+  checkout:
+    build: ../chaos-lab/service
+    environment:
+      SERVICE_NAME: checkout
+      DOWNSTREAM_URL: http://inventory:8000
+    ports: ["8101:8000"]
+
+  inventory:
+    build: ../chaos-lab/service
+    environment:
+      SERVICE_NAME: inventory
+    ports: ["8102:8000"]
+
+  keycloak:   # users' identity provider (OIDC); dev realm with alice@acme, bob@acme, carol@globex
+    image: keycloak/keycloak:26.4
+    command: ["start-dev", "--import-realm", "--hostname=http://localhost:8180", "--hostname-backchannel-dynamic=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports: ["8180:8080"]
+    healthcheck:   # no curl in the image: plain bash /dev/tcp against the management port
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      retries: 30
+
+  redis:   # distributed per-tenant rate limits
+    image: redis:7.4-alpine
+    ports: ["6379:6379"]
+
+  jaeger:  # traces: gateway -> agent -> MCP servers -> chaos-lab
+    image: jaegertracing/jaeger:2.11.0
+    ports: ["16686:16686", "4318:4318"]
+
+  # --- optional ---
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    profiles: [observability]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports: ["9090:9090"]
+
+  # Alerts → Sentinel's webhook → incidents open themselves.
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: [observability]
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-token:/etc/alertmanager/token:ro
+    ports: ["9093:9093"]
+    depends_on:
+      alertmanager-token: { condition: service_completed_successfully }
+
+  alertmanager-token:   # one-shot: asks the gateway (as a dev tenant admin) for an integration token
+    image: python:3.12-slim
+    profiles: [observability]
+    environment:
+      SENTINEL_JWT_SECRET: ${SENTINEL_JWT_SECRET:-dev-only-secret-change-me-0123456789abcdef}
+    volumes:
+      - ../scripts:/scripts:ro
+      - alertmanager-token:/out
+    command: ["python", "/scripts/integration_token.py", "http://gateway:8080", "${SENTINEL_ALERT_TENANT:-acme}", "/out/integration.jwt"]
+
+  loadgen:   # steady traffic so faults show up as error ratio / latency in Prometheus
+    build: ../chaos-lab/service
+    profiles: [observability]
+    environment:
+      LOADGEN_TARGETS: http://checkout:8000
+    command: ["python", "loadgen.py"]
+    depends_on: [checkout]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: [observability]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/sentinel.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  pgdata:
+  alertmanager-token:
+  onnx-cache:

@@ -1,0 +1,13 @@
+flowchart TB
+  R["gateway: http post /api/v1/incidents<br/>(or the alert webhook → background)"] --> A["agent: POST /incidents"]
+  A --> N1[agent.investigator]
+  N1 --> C1["chat model<br/>gen_ai.usage.* · cost"]
+  A --> N2[agent.tools]
+  N2 --> T1[execute_tool get_recent_deploys] --> M1["mcp-observability: POST /mcp"] --> X1["chaos-lab GET /chaos/deploys"]
+  N2 --> T2[execute_tool search_runbooks] --> M2["gateway: http post /mcp"]
+  A --> N3[agent.triage]
+  A --> N4["agent.rca<br/>events: guardrail.*"]
+  D["gateway: http post /api/v1/incidents/id/decision"] --> AD["agent: POST …/decision"]
+  AD --> E1[agent.execute] --> E2["execute_remediation &lt;action&gt;"] --> E3["mcp-remediation: POST /mcp"]
+  AD --> V1[agent.verify] --> V2["mcp-observability: probe_service"]
+  AD --> PM[agent.postmortem]

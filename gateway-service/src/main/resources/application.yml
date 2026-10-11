@@ -1,0 +1,94 @@
+spring:
+  application:
+    name: sentinel-gateway
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/sentinel}
+    username: sentinel_app  # non-superuser, so row-level security applies
+    password: ${SENTINEL_DB_APP_PASSWORD:sentinel_app}
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: 6379
+      timeout: 200ms   # a slow limiter must not become the bottleneck; we fall back instead
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+  ai:
+    model:
+      embedding: transformers  # must match ingestion-service: same model, same vector space
+      chat: ${SENTINEL_LLM_PROVIDER:anthropic}   # anthropic (Claude) | ollama (local model)
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      chat:
+        options:
+          model: ${SENTINEL_OLLAMA_MODEL:gemma4:latest}
+          temperature: 0.0
+        think: false
+    embedding:
+      transformer:
+        onnx:
+          model-uri: ${SENTINEL_EMBEDDING_MODEL_URI:https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx}
+        tokenizer:
+          uri: ${SENTINEL_TOKENIZER_URI:classpath:/onnx/all-MiniLM-L6-v2/tokenizer.json}   # bundled in spring-ai-transformers: no GitHub fetch at startup
+        cache:
+          directory: ${SENTINEL_MODEL_CACHE:${java.io.tmpdir}/sentinel-models}
+    mcp:
+      server:
+        name: sentinel-knowledge
+        version: 0.3.0
+        protocol: STATELESS        # no sessions: any replica serves any call
+        tool-callback-converter: false   # tools are declared explicitly in RunbookMcpServer
+        instructions: "Tenant-scoped search over runbooks and postmortems."
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+      chat:
+        model: claude-opus-5-5
+        max-tokens: 16000
+
+sentinel:
+  auth:
+    issuer: ${SENTINEL_ISSUER:http://localhost:8080}            # iss of every service token this gateway mints
+    signing:
+      keys: ${SENTINEL_SIGNING_KEYS:}                            # JWK set (private EC P-256); empty = ephemeral (dev)
+      active-kid: ${SENTINEL_SIGNING_ACTIVE_KID:}
+      require-configured: ${SENTINEL_SIGNING_REQUIRED:false}     # true in production values
+    oidc:
+      issuer-uri: ${SENTINEL_OIDC_ISSUER:}                       # e.g. http://localhost:8180/realms/sentinel
+      jwk-set-uri: ${SENTINEL_OIDC_JWKS_URI:}                    # internal URL if it differs from the issuer's
+      audience: ${SENTINEL_OIDC_AUDIENCE:sentinel-api}
+    dev:
+      enabled: ${SENTINEL_DEV_TOKENS:false}                      # HS256 dev user tokens: never in production
+      secret: ${SENTINEL_JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+  agent-url: ${SENTINEL_AGENT_URL:http://localhost:8000}
+  requests-per-minute: 120
+  rate-limit:
+    backend: ${SENTINEL_RATE_LIMIT_BACKEND:redis}
+  ask-cache:
+    similarity-threshold: 0.95   # high on purpose: a wrong cached answer costs more than an LLM call
+    ttl-hours: 24
+
+management:
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        sentinel.retrieval.latency: true
+  tracing:
+    sampling:
+      probability: 1.0   # every incident is traced; export target comes from
+                         # MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT (unset = no export)
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  observations:
+    enable:
+      spring.security: false   # ~10 filter-chain spans per request drown the useful ones
+    key-values:
+      application: sentinel-gateway

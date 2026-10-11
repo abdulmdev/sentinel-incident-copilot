@@ -1,0 +1,12 @@
+sequenceDiagram
+  autonumber
+  participant S as service (as sentinel_app, not superuser)
+  participant PG as Postgres
+  S->>PG: BEGIN
+  S->>PG: SELECT set_config('app.tenant_id', 'acme', true)
+  S->>PG: SELECT … FROM knowledge_chunks WHERE tenant_id = 'acme'
+  PG->>PG: policy: tenant_id = current_setting('app.tenant_id')
+  PG-->>S: only acme rows
+  S->>PG: COMMIT (setting ends with the transaction)
+  Note over S,PG: No tenant bound → setting is NULL → policy matches nothing (fail closed)
+  Note over S,PG: Superusers bypass RLS even with FORCE → services never use one

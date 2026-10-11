@@ -1,0 +1,7 @@
+{
+  "tenantId": "acme",
+  "docId": "db-connection-pool",
+  "source": "knowledge/acme/db-connection-pool.md",
+  "title": "Database connection pool exhaustion",
+  "content": "# Database connection pool exhaustion\n\n## Mitigation\nRaise maximumPoolSize."
+}

@@ -1,0 +1,14 @@
+flowchart TB
+  D[POST /incidents/id/decision<br/>reviewer = JWT sub] --> G[agent.get → proposed action, target]
+  G --> Q{approved and<br/>action ≠ escalate?}
+  Q -->|yes| M[mint capability<br/>tenant · incident · action · target · approver · jti · 5 min]
+  Q -->|no| N[no capability]
+  M --> A[agent.decide + X-Sentinel-Remediation-Token]
+  N --> A
+  A --> U[incidents.update: status, execution,<br/>verification, timeline, TTM]
+  U --> E{view has execution?}
+  E -->|yes| AU[INSERT remediation_audit<br/>with capability jti]
+  E -->|no| F
+  AU --> F{status final?<br/>RESOLVED · CLOSED_NO_ACTION · FAILED}
+  F -->|yes| R[release alert links<br/>a recurrence opens a new incident]
+  F -->|no: REMEDIATION_FAILED · ESCALATED| K[keep alert linked<br/>the problem isn't over]

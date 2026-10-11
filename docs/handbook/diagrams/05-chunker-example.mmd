@@ -1,0 +1,14 @@
+flowchart LR
+  subgraph doc["Input: db-connection-pool.md"]
+    D1["# Database connection pool exhaustion<br/>Owner: data-platform …"]
+    D2["## Symptoms<br/>timeout acquiring DB connection …"]
+    D3["## Mitigation<br/>1. raise maximumPoolSize … 2. restart …"]
+  end
+  subgraph chunks["Output chunks (heading path embedded with text)"]
+    C0["#0 · Database connection pool exhaustion"]
+    C1["#1 · … > Symptoms"]
+    C2["#2 · … > Mitigation"]
+  end
+  D1 --> C0
+  D2 --> C1
+  D3 --> C2

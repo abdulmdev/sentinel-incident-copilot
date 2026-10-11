@@ -1,0 +1,21 @@
+gantt
+  title Phases and what each added (cumulative system)
+  dateFormat X
+  axisFormat %s
+  section Foundation
+  Gateway, agent, chaos-lab, approval      :p1, 0, 1
+  section Knowledge
+  Kafka ingestion, hybrid RAG, RLS         :p2, 1, 2
+  section Agents
+  MCP, tool tokens, budgets, durability    :p3, 2, 3
+  section Evaluation
+  Benchmark, CI gate, deploy-window fix    :p4, 3, 4
+  Local LLM provider                       :p4b, 4, 5
+  section Hardening
+  Guardrails, Redis, cache, tracing, k6    :p5, 5, 6
+  section Ship
+  Console, Helm, Terraform, CI, handbook   :p6, 6, 7
+  section Close the loop
+  Alerts, capabilities, execute, verify, TTM :p7, 7, 8
+  section Zero trust
+  ES256 + JWKS, OIDC, every hop authenticated :p8, 8, 9

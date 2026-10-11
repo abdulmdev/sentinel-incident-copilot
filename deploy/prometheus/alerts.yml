@@ -1,0 +1,35 @@
+# Alerts on the chaos-lab services. Each carries a `service` label (Sentinel requires it to open an
+# incident) and a severity that maps to SEV1/2/3. Short `for:` windows keep the demo loop fast; in
+# production these would be minutes, not seconds.
+groups:
+  - name: chaos-lab
+    rules:
+      - alert: HighErrorRatio
+        expr: |
+          sum by (service) (rate(chaos_requests_total{status="error"}[1m]))
+            / sum by (service) (rate(chaos_requests_total[1m])) > 0.2
+        for: 30s
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.service }} error ratio {{ $value | humanizePercentage }} (above 20%)"
+
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, sum by (service, le) (rate(chaos_request_seconds_bucket[1m]))) > 1
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }} p95 latency {{ $value | humanizeDuration }} (above 1s)"
+
+      - alert: MemoryGrowth
+        expr: chaos_memory_mb > 300
+        for: 15s
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }} heap at {{ $value | printf \"%.0f\" }} MB and climbing (above 300 MB)"
+
+      - alert: DbPoolSaturated
+        expr: chaos_db_pool_in_use >= 20
+        for: 15s
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.service }} DB pool saturated ({{ $value }}/20 connections in use)"

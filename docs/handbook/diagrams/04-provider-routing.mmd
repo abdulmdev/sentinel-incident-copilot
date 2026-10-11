@@ -1,0 +1,8 @@
+flowchart LR
+  P{SENTINEL_LLM_PROVIDER} -->|anthropic + API key| A[Claude]
+  P -->|anthropic, no key| R[Rules + scripted plan]
+  P -->|ollama| O[Local gemma4<br/>temperature 0 · schema as format]
+  A --> A1[triage: claude-haiku-4-5]
+  A --> A2[investigate: claude-opus-5-5]
+  A --> A3[RCA: claude-opus-5-5]
+  O --> O1[all steps: gemma4:latest<br/>cost $0]

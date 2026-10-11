@@ -1,0 +1,23 @@
+sequenceDiagram
+  autonumber
+  participant A as Author
+  participant GW as gateway
+  participant K as Kafka
+  participant IN as ingestion
+  participant DB as Postgres
+  A->>GW: POST /knowledge/documents
+  GW->>K: key tenant:docId · tenantId from JWT · acks=all
+  alt acked within 5 s
+    GW-->>A: 202 QUEUED
+  else no ack
+    GW-->>A: 503 (never silently dropped)
+  end
+  K->>IN: consume (group sentinel-ingestion)
+  IN->>DB: same content hash already indexed?
+  alt unchanged
+    IN->>IN: skip (no embedding cost)
+  else new or changed
+    IN->>IN: heading-aware chunks → embed (384-d)
+    IN->>DB: one transaction: upsert doc · delete chunks · insert chunks
+  end
+  Note over IN,K: transient error → backoff ≤ 10 s → DLT · invalid doc → DLT now

@@ -1,0 +1,13 @@
+flowchart LR
+  oncall([On-call engineer]) -->|browser: review, approve| console[Sentinel web console]
+  authors([Runbook authors]) -->|upload runbooks| console
+  alerting([Prometheus + Alertmanager]) -->|webhook · integration token| platform
+  console --> platform[Sentinel platform]
+  oncall -->|sign in: OIDC| idp[(Identity provider<br/>Keycloak / company IdP)]
+  idp -. user tokens, JWKS .-> platform
+  platform -->|Messages API| claude[(Anthropic Claude)]
+  platform -->|optional, local| ollama[(Ollama: gemma4)]
+  platform -->|read-only telemetry + probes via MCP| services[(Production services:<br/>deploys, logs, metrics)]
+  platform -->|approved action only · single-use capability| deploytool[(Team deploy tooling<br/>rollback · restart · pool · failover · scale)]
+  deploytool --> services
+  alerting -. scrapes .-> services

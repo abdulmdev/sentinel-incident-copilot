@@ -1,0 +1,15 @@
+stateDiagram-v2
+  [*] --> INVESTIGATING: POST /incidents or an alert (gateway record)
+  INVESTIGATING --> FAILED: agent unreachable or error
+  INVESTIGATING --> AWAITING_APPROVAL: investigation + RCA + guardrails
+  AWAITING_APPROVAL --> CLOSED_NO_ACTION: rejected
+  AWAITING_APPROVAL --> ESCALATED: approved escalate (nothing to execute)
+  AWAITING_APPROVAL --> REMEDIATING: approved action + capability
+  REMEDIATING --> REMEDIATION_FAILED: no/refused capability or adapter error
+  REMEDIATING --> RESOLVED: executed and verified healthy
+  REMEDIATING --> REMEDIATION_FAILED: executed but still unhealthy
+  RESOLVED --> [*]
+  CLOSED_NO_ACTION --> [*]
+  FAILED --> [*]
+  note right of AWAITING_APPROVAL: second decision → 409 (single use)
+  note right of REMEDIATION_FAILED: stays open (alert linked), a human takes over

@@ -1,0 +1,7 @@
+flowchart LR
+  REC[record] --> PROC{process}
+  PROC -->|ok| COMMIT[offset committed]
+  PROC -->|InvalidDocumentException| DLT[(knowledge.documents-dlt)]
+  PROC -->|transient error| BO[exponential backoff<br/>500 ms × 2, max 10 s]
+  BO --> PROC
+  BO -->|budget exhausted| DLT

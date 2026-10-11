@@ -1,0 +1,13 @@
+---
+config:
+  xyChart:
+    showDataLabel: true
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#b42318"
+---
+xychart-beta
+  title "Harmful action rate by benchmark run (%) - lower is better"
+  x-axis ["v1 rules", "v2 deploy window", "v2 held-out", "v2 + guardrails (112)", "held-out (112)"]
+  y-axis "harmful %" 0 --> 20
+  bar [16, 0, 0, 0, 0]

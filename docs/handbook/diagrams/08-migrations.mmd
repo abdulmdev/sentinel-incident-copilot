@@ -1,0 +1,7 @@
+flowchart LR
+  V1["V1 core<br/>vector extension · sentinel_app role<br/>tenants · incidents + RLS"] --> V2["V2 knowledge<br/>documents · chunks<br/>HNSW + GIN · RLS"]
+  V2 --> V3["V3 checkpoints<br/>schema langgraph<br/>owned by sentinel_app"]
+  V3 --> V4["V4 ask_cache<br/>semantic cache + RLS"]
+  V4 --> V5["V5 incident record<br/>proposed_action · reviewer<br/>opened_by · updated_at"]
+  V5 --> V6["V6 closed loop<br/>incident timeline · TTM<br/>alert_links · remediation_audit"]
+  V6 --> V7["V7 integration tokens<br/>jti · expiry · revocation"]

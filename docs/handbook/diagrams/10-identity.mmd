@@ -1,0 +1,28 @@
+flowchart TB
+  subgraph issuers[Issuers]
+    IDP["IdP (Keycloak)<br/>RS256 · users"]
+    G["gateway key ring<br/>ES256 · kid · private keys ONLY here"]
+    DEV["dev issuer (optional)<br/>HS256 · users only · off in prod"]
+  end
+  subgraph tokens[Tokens]
+    U[user token<br/>aud sentinel-api]
+    T[tool token<br/>sentinel-mcp · 15 min]
+    A[agent-call token<br/>sentinel-agent · 60 s]
+    C[capability<br/>sentinel-remediation · 5 min · once]
+    I[integration token<br/>sentinel-alerts · revocable]
+  end
+  subgraph verifiers["Verifiers (public keys only)"]
+    VG[gateway API + /mcp + webhook]
+    VA[agent]
+    VO[mcp-observability]
+    VR[remediation adapter]
+  end
+  IDP --> U
+  DEV -.-> U
+  G --> T & A & C & I
+  U --> VG
+  T --> VG & VO
+  I --> VG
+  A --> VA
+  C --> VR
+  J[("/.well-known/jwks.json")] -. keys .-> VA & VO & VR

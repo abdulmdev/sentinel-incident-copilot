@@ -1,0 +1,16 @@
+flowchart TB
+  subgraph inputs[On every tool output, before model, checkpoint, evidence]
+    T[raw tool output] --> P[PII redaction<br/>email · card + Luhn · JWT · API keys]
+    P --> I[injection neutralization<br/>cut instruction-like spans]
+    I --> W[wrap in untrusted_tool_output]
+  end
+  subgraph outputs[On every RCA, rules or LLM]
+    R[RCA proposal] --> C[validate citations<br/>normalize or drop]
+    C --> N[normalize target<br/>unambiguous service mention]
+    N --> PL{policy interlocks}
+    PL -->|target never investigated| ESC[downgrade to escalate]
+    PL -->|rollback without deploy<br/>in 30-min window| ESC
+    PL -->|pass| OK[proposal for human approval]
+  end
+  W --> EVENTS[(guardrail events:<br/>state · postmortem · span events · metrics)]
+  C & N & ESC --> EVENTS

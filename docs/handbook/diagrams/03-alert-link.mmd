@@ -1,0 +1,13 @@
+flowchart TB
+  IN[firing alert<br/>tenant · service · fingerprint] --> TX[BEGIN · set tenant for RLS]
+  TX --> L[pg_advisory_xact_lock hashtext tenant/service]
+  L --> S{active link for<br/>this fingerprint?}
+  S -->|yes| DD[fire_count + 1<br/>DEDUPLICATED]
+  S -->|no| C{active link for another<br/>alert on this service?}
+  C -->|yes| CO[link fingerprint → that incident<br/>CORRELATED]
+  C -->|no| OP[create incident in this transaction<br/>opened_at = startsAt · link it<br/>OPENED]
+  DD & CO & OP --> CM[COMMIT · lock released]
+  CM --> BG{OPENED?}
+  BG -->|yes| INV[investigate in background]
+  BG -->|no| DONE[count only]
+  IDX[(partial unique index<br/>tenant, fingerprint WHERE active)] -. backstop .-> OP

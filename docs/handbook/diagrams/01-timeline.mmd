@@ -1,0 +1,10 @@
+timeline
+  title Sentinel build phases
+  Phase 1 Foundation : Gateway, LangGraph agent, chaos-lab : Human approval interrupt
+  Phase 2 Ingestion + RAG : Kafka ingestion, local embeddings : Hybrid pgvector + full-text retrieval : RLS with non-superuser role
+  Phase 3 Agents : MCP tool servers : Downscoped tool tokens : Budgets + Postgres checkpoints
+  Phase 4 Evaluation : 112 replayed incidents : CI gate, found 16% harmful-rollback bug
+  Phase 5 Hardening : Guardrails + injection tier : Redis limits, semantic cache : OpenTelemetry, Grafana, k6
+  Phase 6 Ship : Next.js console : Helm on Kubernetes, Terraform for AWS : CI and handbook
+  Phase 7 Close the loop : Alerts open incidents : Capability-gated execution : Verification and time to mitigate
+  Phase 8 Zero-trust identity : ES256 service tokens + JWKS : Keycloak OIDC login : Every hop authenticated, checkpoint RLS

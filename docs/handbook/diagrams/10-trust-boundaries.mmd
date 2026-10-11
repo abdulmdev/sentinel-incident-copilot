@@ -1,0 +1,27 @@
+flowchart LR
+  subgraph untrusted[Untrusted]
+    BR[Browser]
+    LOGS["Log text from services<br/>(attacker-influenced)"]
+    LLMOUT[LLM output]
+    BODY[Request bodies claiming identity]
+    LBL["Alert labels<br/>(tenant ignored, service validated)"]
+  end
+  subgraph edge[Edge]
+    KC[(IdP: Keycloak<br/>tenant_id admin-only)]
+    WEB[web BFF<br/>OIDC code + PKCE · httpOnly session]
+    AM[Alertmanager<br/>revocable integration token]
+  end
+  subgraph platform["Platform: every hop authenticated"]
+    GW["gateway<br/>verifies users (IdP JWKS)<br/>sole issuer of service tokens (ES256)"] -->|"agent-call token 60 s"| AG[agent<br/>tenant bound · no signing key]
+    AG -->|tool token| MCP[MCP servers<br/>verify via JWKS]
+    AG -->|capability, once| MR[remediation adapter<br/>verifies via JWKS · fails closed]
+    DB[(Postgres<br/>RLS FORCE incl. checkpoints)]
+  end
+  BR --> WEB --> GW
+  KC -. tokens .-> WEB
+  AM --> GW
+  LBL -. labels .-> AM
+  LOGS -->|tool output| AG
+  LLMOUT -->|proposals| AG
+  BODY -. ignored .-> GW
+  GW & AG --> DB

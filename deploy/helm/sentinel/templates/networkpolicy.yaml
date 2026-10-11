@@ -1,0 +1,27 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $r := .Release.Name }}
+# Default deny: no pod accepts traffic unless a policy below allows it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $r }}-default-deny
+  labels: {{- include "sentinel.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/instance: {{ $r }} } }
+  policyTypes: [Ingress]
+
+{{- /* who may call whom: console -> gateway -> agent -> MCP servers -> observed services */}}
+{{- include "sentinel.np" (dict "root" . "to" "web" "from" (list) "namespace" .Values.networkPolicy.ingressNamespaceLabel) }}
+{{- /* MCP servers and the remediation adapter fetch the gateway's public keys (JWKS). */}}
+{{- include "sentinel.np" (dict "root" . "to" "gateway" "from" (list "web" "agent" "mcp-observability" "mcp-remediation") "namespace" .Values.networkPolicy.ingressNamespaceLabel) }}
+{{- include "sentinel.np" (dict "root" . "to" "agent" "from" (list "gateway")) }}
+{{- include "sentinel.np" (dict "root" . "to" "mcp-observability" "from" (list "agent")) }}
+{{- /* Only the agent reaches the remediation adapter, and it still needs a human-approved capability. */}}
+{{- include "sentinel.np" (dict "root" . "to" "mcp-remediation" "from" (list "agent")) }}
+{{- include "sentinel.np" (dict "root" . "to" "ingestion" "from" (list)) }}
+{{- if .Values.chaosLab.enabled }}
+{{- range .Values.chaosLab.services }}
+{{- include "sentinel.np" (dict "root" $ "to" . "from" (concat (list "mcp-observability" "mcp-remediation") $.Values.chaosLab.services)) }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,17 @@
+flowchart LR
+  subgraph services[Services]
+    GW[gateway<br/>Micrometer → OpenTelemetry]
+    AG[agent<br/>OTel SDK · FastAPI · httpx]
+    MO[mcp-observability<br/>ASGI middleware · httpx]
+    MR[mcp-remediation<br/>JSON audit log]
+    ING[ingestion]
+    CH[chaos-lab]
+  end
+  GW -->|"traceparent"| AG -->|"traceparent"| MO
+  AG -->|"traceparent"| GW
+  AG --> MR
+  GW & AG & MO -->|OTLP/HTTP :4318| J[(Jaeger<br/>traces)]
+  P[(Prometheus<br/>rules every 5 s)] -->|scrape /actuator/prometheus, /metrics| GW & AG & ING & CH
+  P -->|firing / resolved| AM[Alertmanager] -->|webhook| GW
+  G[Grafana dashboard<br/>closed loop · cost · safety · latency] --> P
+  G -. trace links .-> J

@@ -1,0 +1,6 @@
+flowchart TB
+  L4["System behavior · 112-incident benchmark + held-out · CI gate"]
+  L3["End to end · kind cluster: chart, incident, NetworkPolicy · live demos"]
+  L2["Integration on real infrastructure · Testcontainers pgvector + Redis<br/>RLS, SQL, vector search, Lua, checkpoint durability"]
+  L1["Unit and slice · controllers with real JWTs, guardrails, rules, budgets, chunker, RRF, scorer"]
+  L4 --- L3 --- L2 --- L1

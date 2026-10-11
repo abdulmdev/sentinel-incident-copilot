@@ -1,0 +1,10 @@
+flowchart LR
+  GEN["generate.py<br/>seeded · 112 incidents<br/>+ held-out seed 7"] --> SC[(scenarios.jsonl)]
+  SC --> REPLAY["replay.py<br/>MCP-shaped tools<br/>offline BM25 runbooks"]
+  REPLAY --> GRAPH["real agent graph<br/>loop · budgets · guardrails · fallbacks"]
+  GRAPH --> SCORE["scoring.py<br/>deterministic metrics<br/>no LLM judge"]
+  SCORE --> RES[(results/*.json<br/>history.jsonl)]
+  RES --> REP[REPORT.md]
+  RES --> GATE{"thresholds.json<br/>--check"}
+  GATE -->|regression| FAIL[CI fails]
+  GATE -->|ok| PASS[CI passes]

@@ -1,0 +1,22 @@
+# EKS overlay. Endpoints come from `terraform output` (deploy/terraform/aws); secrets from
+# AWS Secrets Manager via External Secrets Operator. Every data store requires TLS.
+image:
+  registry: 123456789012.dkr.ecr.eu-west-1.amazonaws.com
+postgres: { host: REPLACE_rds_endpoint, sslmode: require }
+kafka: { bootstrapServers: REPLACE_msk_bootstrap_brokers_tls }
+redis: { host: REPLACE_redis_endpoint }
+extraConfig:
+  SPRING_KAFKA_SECURITY_PROTOCOL: SSL       # MSK client_broker = TLS
+  SPRING_DATA_REDIS_SSL_ENABLED: "true"     # ElastiCache transit encryption
+externalSecrets:
+  enabled: true
+  appSecretKey: sentinel/app
+  dbAdminSecretKey: REPLACE_rds_master_secret_arn
+tracing: { otlpEndpoint: http://otel-collector.observability:4318 }
+networkPolicy:
+  ingressNamespaceLabel: { kubernetes.io/metadata.name: kube-system }   # AWS Load Balancer Controller
+  externalAccess: []                                                   # only via the ALB
+auth:
+  oidc:
+    issuer: REPLACE_oidc_issuer          # e.g. https://login.example.com/realms/sentinel (your IdP)
+  publicUrl: REPLACE_console_url         # e.g. https://sentinel.example.com

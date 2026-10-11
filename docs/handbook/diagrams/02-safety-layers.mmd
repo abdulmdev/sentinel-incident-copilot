@@ -1,0 +1,15 @@
+flowchart LR
+  P[Model proposal] --> L1[1 · Closed action set<br/>6 allowed actions]
+  L1 --> L2[2 · Constrained decoding<br/>target ∈ investigated services]
+  L2 --> L3[3 · Citation validation<br/>only gathered evidence]
+  L3 --> L4[4 · Policy interlocks<br/>no rollback without a running recent deploy]
+  L4 --> L5{5 · Human approval}
+  L5 -->|approved| L6[6 · Capability<br/>this action · this target · once · 5 min]
+  L6 --> L7[7 · Verification<br/>probe: success ≥ 95%, p95 < 1 s]
+  L7 -->|healthy| OK[RESOLVED + TTM]
+  L7 -. not healthy .-> FAIL[REMEDIATION_FAILED<br/>stays open for a human]
+  IN[Tool output] --> S0[0 · Input sanitization<br/>PII redaction · injection removal]
+  S0 --> P
+  L4 -. violation .-> ESC[Downgrade to escalate<br/>+ recorded guardrail event]
+  classDef det fill:#e8f0ff,stroke:#2f5bd3,color:#1d1d1b
+  class L1,L2,L3,L4,S0,L6,L7 det

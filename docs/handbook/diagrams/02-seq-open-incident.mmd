@@ -1,0 +1,28 @@
+sequenceDiagram
+  autonumber
+  participant U as Console (BFF)
+  participant GW as gateway
+  participant DB as Postgres
+  participant AG as agent
+  participant MO as mcp-observability
+  participant MK as gateway /mcp
+  participant L as LLM (optional)
+  U->>GW: POST /api/v1/incidents (user JWT)
+  GW->>GW: verify JWT · tenant from claim · rate limit
+  GW->>DB: INSERT incident INVESTIGATING (RLS-bound)
+  GW->>GW: mint tool token (tenant, knowledge:read, 15 min)
+  GW->>AG: POST /incidents + traceparent + X-Sentinel-Tool-Token
+  loop until done, 8 tool calls, or $0.50
+    AG->>L: next step? (or scripted plan)
+    par parallel tool calls
+      AG->>MO: deploys / error logs / metrics
+    and
+      AG->>MK: search_runbooks (Bearer tool token)
+    end
+    AG->>AG: sanitize output · record evidence · checkpoint
+  end
+  AG->>L: triage (cheap model) → RCA (strong model)
+  AG->>AG: validate citations · policy interlocks · interrupt()
+  AG-->>GW: view: AWAITING_APPROVAL
+  GW->>DB: UPDATE status, proposed action, RCA
+  GW-->>U: view

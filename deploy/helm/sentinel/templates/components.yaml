@@ -1,0 +1,106 @@
+{{- range $name, $c := .Values.components }}
+{{- $ctx := dict "root" $ "name" $name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+  labels: {{- include "sentinel.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  {{- if not (and $c.autoscaling $c.autoscaling.enabled) }}
+  replicas: {{ $c.replicas }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "sentinel.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "sentinel.selector" $ctx | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") $ | sha256sum }}
+        {{- with $c.metricsPath }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $c.port | quote }}
+        prometheus.io/path: {{ . }}
+        {{- end }}
+    spec:
+      securityContext: {{- toYaml $.Values.podSecurity | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "sentinel.selector" $ctx | nindent 14 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "sentinel.image" $ctx }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports: [{ name: http, containerPort: {{ $c.port }} }]
+          envFrom: [{ configMapRef: { name: {{ $.Release.Name }}-config } }]
+          env:
+            {{- /* Least privilege: each component gets only the secrets it lists. Above all, the agent never
+                   gets signing material: with it, a compromised agent could mint its own capability. */}}
+            {{- $envFor := dict "jwtSecret" "SENTINEL_JWT_SECRET" "dbAppPassword" "SENTINEL_DB_APP_PASSWORD" "anthropicApiKey" "ANTHROPIC_API_KEY" "signingKeys" "SENTINEL_SIGNING_KEYS" "oidcClientSecret" "OIDC_CLIENT_SECRET" }}
+            {{- range $key := ($c.secrets | default list) }}
+            {{- include "sentinel.secretEnv" (dict "root" $ "env" (get $envFor $key) "key" $key) | nindent 12 }}
+            {{- end }}
+            {{- if eq $name "agent" }}
+            - name: SENTINEL_CHECKPOINT_DSN
+              valueFrom: { secretKeyRef: { name: {{ include "sentinel.secretName" $ }}, key: checkpointDsn, optional: true } }
+            {{- end }}
+            {{- range $k, $v := $c.env }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+          securityContext: {{- include "sentinel.containerSecurity" $ | nindent 12 }}
+          readinessProbe: { httpGet: { path: {{ $c.probes.readiness }}, port: http }, periodSeconds: 5, failureThreshold: 3 }
+          livenessProbe: { httpGet: { path: {{ $c.probes.liveness }}, port: http }, periodSeconds: 10, failureThreshold: 6 }
+          startupProbe: { httpGet: { path: {{ $c.probes.liveness }}, port: http }, periodSeconds: 5, failureThreshold: 60 }
+          resources: {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+{{- if $c.service }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+  labels: {{- include "sentinel.labels" $ | nindent 4 }}
+spec:
+  type: {{ $c.service.type }}
+  selector: {{- include "sentinel.selector" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $c.port }}
+      targetPort: http
+      {{- with $c.service.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
+{{- end }}
+{{- if and $c.autoscaling $c.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+  labels: {{- include "sentinel.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $.Release.Name }}-{{ $name }} }
+  minReplicas: {{ $c.autoscaling.minReplicas }}
+  maxReplicas: {{ $c.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ $c.autoscaling.targetCPU }} } }
+{{- end }}
+{{- if or (gt (int $c.replicas) 1) (and $c.autoscaling $c.autoscaling.enabled) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+  labels: {{- include "sentinel.labels" $ | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "sentinel.selector" $ctx | nindent 6 }}
+{{- end }}
+{{- end }}

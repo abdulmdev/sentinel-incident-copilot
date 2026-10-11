@@ -1,0 +1,23 @@
+flowchart TB
+  user([Users]) --> ALB
+  subgraph AWS["AWS region · 3 availability zones"]
+    subgraph pub[Public subnets]
+      ALB[Application Load Balancer]
+      NAT[NAT gateway per AZ]
+    end
+    subgraph priv[Private subnets]
+      subgraph EKS["EKS · private API endpoint · KMS-encrypted secrets"]
+        W[web] --> GW2["gateway · HPA 2-8"] --> AG2["agent · HPA 2-10"] --> MO2[mcp-observability]
+        MIG["migrate Job (Helm hook)"]
+      end
+      RDS[("RDS Postgres 16 Multi-AZ<br/>pgvector · force SSL · KMS")]
+      MSK[("MSK · 3 brokers · TLS")]
+      EC[("ElastiCache Redis<br/>Multi-AZ · TLS")]
+    end
+    SM[("Secrets Manager")] -->|External Secrets Operator| EKS
+    ECR[("ECR · immutable tags · scan on push")] -.images.-> EKS
+  end
+  ALB --> W
+  GW2 & AG2 & MIG --> RDS
+  GW2 --> MSK & EC
+  EKS -->|egress via NAT| LLMAPI[("LLM API")]

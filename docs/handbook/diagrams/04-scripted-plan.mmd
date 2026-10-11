@@ -1,0 +1,4 @@
+flowchart LR
+  S0["Step 0 (parallel)<br/>get_recent_deploys<br/>get_error_logs ERROR<br/>get_error_logs WARN<br/>get_service_metrics"] --> S1["Step 1<br/>search_runbooks<br/>query = top 3 observed log messages<br/>limit 3"]
+  S1 --> S2[Step 2: done]
+  S0 -. no knowledge token .-> S2

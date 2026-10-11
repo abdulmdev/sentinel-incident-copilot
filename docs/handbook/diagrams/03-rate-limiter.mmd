@@ -1,0 +1,15 @@
+flowchart TB
+  A[tryAcquire bucket] --> B{Redis reachable<br/>within 200 ms?}
+  B -->|yes| L[Lua script, atomic]
+  L --> L1[now = Redis TIME]
+  L1 --> L2[load tokens, ts<br/>default: full bucket]
+  L2 --> L3["tokens = min(capacity,<br/>tokens + elapsed × refill)"]
+  L3 --> L4{tokens ≥ 1?}
+  L4 -->|yes| L5[tokens − 1 · allowed]
+  L4 -->|no| L6[denied]
+  L5 & L6 --> L7[save tokens, ts<br/>PEXPIRE ≈ full refill + 1 s]
+  B -->|no / error| FB[fallback counter +1<br/>per-instance bucket decides]
+  L7 --> R{allowed?}
+  FB --> R
+  R -->|no| X[429 + Retry-After: 1]
+  R -->|yes| OK[continue]

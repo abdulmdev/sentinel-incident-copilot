@@ -1,0 +1,14 @@
+sequenceDiagram
+  autonumber
+  participant H as helm upgrade --install
+  participant K as Kubernetes
+  participant J as migrate Job
+  participant DB as Postgres
+  H->>K: hook weight -10: Secret / ExternalSecret
+  H->>K: hook weight 0: migrate Job
+  K->>J: run ingestion image --spring.profiles.active=migrate
+  J->>DB: Flyway as admin role (the only admin credential holder)
+  J-->>K: exit 0 (Job deleted on success)
+  H->>K: apply ConfigMap, Deployments, Services, HPA, PDB, NetworkPolicies
+  K->>K: pods start as sentinel_app, Flyway disabled
+  H->>H: --wait for readiness → STATUS deployed

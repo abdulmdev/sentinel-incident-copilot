@@ -1,0 +1,38 @@
+{{- if .Values.migrations.enabled }}
+# Flyway as a hook Job: schema changes land before new pods roll out, and serving pods never
+# hold admin credentials (they connect as the RLS-restricted app role).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate
+  labels: {{- include "sentinel.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels: {{- include "sentinel.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      securityContext: {{- toYaml .Values.podSecurity | nindent 8 }}
+      containers:
+        - name: flyway
+          image: {{ include "sentinel.image" (dict "root" . "name" "ingestion") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--spring.profiles.active=migrate"]
+          securityContext: {{- include "sentinel.containerSecurity" . | nindent 12 }}
+          env:
+            - { name: SPRING_DATASOURCE_URL, value: "jdbc:postgresql://{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}{{ with .Values.postgres.sslmode }}?sslmode={{ . }}{{ end }}" }
+            - { name: SPRING_FLYWAY_CONNECT_RETRIES, value: "30" }
+            - { name: SENTINEL_DB_ADMIN_USER, value: {{ .Values.migrations.dbAdminUser | quote }} }
+            {{- include "sentinel.secretEnv" (dict "root" . "env" "SENTINEL_DB_ADMIN_PASSWORD" "key" "dbAdminPassword") | nindent 12 }}
+            {{- include "sentinel.secretEnv" (dict "root" . "env" "SENTINEL_DB_APP_PASSWORD" "key" "dbAppPassword") | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          resources: { requests: { cpu: 100m, memory: 512Mi }, limits: { memory: 1Gi } }
+      volumes: [{ name: tmp, emptyDir: {} }]
+{{- end }}

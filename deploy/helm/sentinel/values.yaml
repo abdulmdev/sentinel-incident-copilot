@@ -1,0 +1,120 @@
+# Production-shaped defaults. Environment overlays: values-kind.yaml (local), values-aws.yaml (EKS).
+image:
+  registry: ghcr.io/your-org     # images are <registry>/<prefix><component>:<tag>
+  prefix: sentinel-
+  tag: "0.6.0"
+  pullPolicy: IfNotPresent
+
+# External dependencies. In AWS these are RDS (pgvector), MSK and ElastiCache from Terraform.
+postgres: { host: postgres.example.internal, port: 5432, database: sentinel, sslmode: "" }   # "require" on RDS
+kafka: { bootstrapServers: kafka.example.internal:9092 }
+redis: { host: redis.example.internal }
+
+llm:
+  provider: anthropic            # anthropic | ollama
+  ollamaBaseUrl: ""
+  ollamaModel: gemma4:latest
+
+# Extra non-secret settings for the shared ConfigMap (e.g. TLS switches for managed services).
+extraConfig: {}
+
+# Sync the app Secret from AWS Secrets Manager with External Secrets Operator.
+externalSecrets:
+  enabled: false
+  secretStore: aws-secrets-manager
+  appSecretKey: sentinel/app            # from terraform output app_secret_arn
+  dbAdminSecretKey: ""                  # from terraform output rds_master_secret_arn
+
+tracing:
+  otlpEndpoint: ""               # e.g. http://otel-collector.observability:4318 ("" = tracing export off)
+
+secrets:
+  # Create the Secret from these values (dev only), or point to one managed out of band
+  # (External Secrets Operator / Secrets Manager) with existingSecret.
+  create: false
+  existingSecret: sentinel
+  values: { signingKeys: "", oidcClientSecret: "", jwtSecret: "", dbAppPassword: "", dbAdminPassword: "", anthropicApiKey: "" }
+
+# Identity (Phase 8). Users: the company IdP (OIDC). Service tokens: ES256, signed only by the gateway.
+auth:
+  devTokens: false                 # HS256 dev user tokens (needs secrets.values.jwtSecret): never in production
+  signing:
+    requireConfigured: true        # refuse an ephemeral key: replicas must share signingKeys (gen_signing_key.py)
+  oidc:
+    issuer: ""                     # exact iss of user tokens, e.g. https://login.example.com/realms/sentinel
+    jwksUri: ""                    # if the IdP's keys are fetched from another (internal) URL
+    audience: sentinel-api
+    clientId: sentinel-console
+  publicUrl: ""                    # the console's external URL (OIDC redirect URI base)
+
+migrations:
+  enabled: true                  # Helm hook Job: the only workload with admin DB credentials
+  dbAdminUser: sentinel
+
+networkPolicy:
+  enabled: true
+  ingressNamespaceLabel: { kubernetes.io/metadata.name: ingress-nginx }
+  monitoringNamespaceLabel: { kubernetes.io/metadata.name: monitoring }
+  externalAccess: []             # components reachable from outside the cluster, e.g. [web]
+
+podSecurity: &podSecurity
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile: { type: RuntimeDefault }
+
+components:
+  gateway:
+    secrets: [signingKeys, dbAppPassword, anthropicApiKey]   # the only holder of signing keys
+    port: 8080
+    replicas: 2
+    probes: { liveness: /actuator/health/liveness, readiness: /actuator/health/readiness }
+    metricsPath: /actuator/prometheus
+    resources: { requests: { cpu: 250m, memory: 768Mi }, limits: { memory: 1536Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 8, targetCPU: 70 }
+    service: { type: ClusterIP }
+  ingestion:
+    secrets: [dbAppPassword]
+    port: 8090
+    replicas: 2
+    probes: { liveness: /actuator/health/liveness, readiness: /actuator/health/readiness }
+    metricsPath: /actuator/prometheus
+    resources: { requests: { cpu: 250m, memory: 768Mi }, limits: { memory: 1536Mi } }
+  agent:
+    secrets: [anthropicApiKey]                  # never signingKeys or jwtSecret (see templates/components.yaml)
+    port: 8000
+    replicas: 2
+    probes: { liveness: /healthz, readiness: /healthz }
+    metricsPath: /metrics
+    resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 1Gi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 10, targetCPU: 70 }
+    service: { type: ClusterIP }
+  mcp-observability:
+    secrets: []
+    port: 8200
+    replicas: 2
+    probes: { liveness: /healthz, readiness: /healthz }
+    resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+    service: { type: ClusterIP }
+  mcp-remediation:              # deploy-tool adapter: runs approved actions with a single-use capability
+    secrets: []                                 # verifies capabilities with the gateway's public keys
+    port: 8300
+    replicas: 2                   # stateless: the replay store (Redis) is shared, so replicas can't double-spend
+    probes: { liveness: /healthz, readiness: /healthz }
+    resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+    service: { type: ClusterIP }
+  web:
+    secrets: [oidcClientSecret]                 # OIDC code exchange (confidential client)
+    port: 3000
+    replicas: 2
+    probes: { liveness: /login, readiness: /login }
+    resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 512Mi } }
+    service: { type: ClusterIP }
+
+# Remediation targets: service=base URL of its deploy/ops API (the chaos-lab services when chaosLab is on).
+remediation:
+  targets: {}                    # e.g. { checkout: "http://deployer.internal/checkout" }
+
+# Demo services the agent investigates (off in production).
+chaosLab:
+  enabled: false
+  services: [checkout, inventory]

@@ -1,0 +1,23 @@
+sequenceDiagram
+  autonumber
+  participant P as Prometheus
+  participant AM as Alertmanager
+  participant GW as gateway
+  participant DB as Postgres
+  participant AG as agent
+  P->>P: rule HighErrorRatio for 30s
+  P->>AM: firing alert {service, severity, startsAt}
+  AM->>GW: POST /api/v1/alerts/alertmanager · Bearer integration token
+  GW->>GW: require aud sentinel-alerts + scope alerts:write · tenant from token
+  GW->>DB: BEGIN · pg_advisory_xact_lock(tenant/service)
+  alt this fingerprint has an active incident
+    GW->>DB: fire_count + 1 → deduplicated
+  else another alert on this service has an active incident
+    GW->>DB: link fingerprint → that incident → correlated
+  else
+    GW->>DB: INSERT incident (opened_at = startsAt, source alertmanager) + link → opened
+  end
+  GW->>DB: COMMIT
+  GW-->>AM: 202 {opened, deduplicated, correlated, resolved, skipped}
+  GW-)AG: investigate in background (trace context propagated)
+  Note over AM,GW: later: status resolved → stamp alert_resolved_at when the incident's last alert clears

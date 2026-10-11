@@ -1,0 +1,5 @@
+flowchart LR
+  LOGIN["/login<br/>dev sign-in"] --> LIST["/ <br/>incident list: status · TTM · source<br/>+ open form"]
+  LIST -->|open incident or click an alert-opened one| DETAIL["/incidents/id<br/>proposal · approve/reject<br/>closed loop: timeline · execution · probes · TTM<br/>hypotheses · evidence · guardrails · postmortem"]
+  LIST --> ASK["/ask<br/>grounded answers · citations · cached badge"]
+  LIST --> KNOW["/knowledge<br/>vector vs keyword vs hybrid"]

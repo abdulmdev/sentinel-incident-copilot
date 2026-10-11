@@ -1,0 +1,19 @@
+sequenceDiagram
+  autonumber
+  participant U as Console
+  participant GW as gateway /ask
+  participant DB as Postgres
+  participant L as LLM
+  U->>GW: POST /ask {question}
+  GW->>GW: embed question (local ONNX)
+  GW->>DB: knowledge version (tenant documents fingerprint)
+  GW->>DB: nearest cached answer (tenant, model, version, < 24 h)
+  alt similarity ≥ 0.95
+    GW-->>U: answer + citations (cached: true)
+  else miss
+    GW->>DB: hybrid search top 5
+    GW->>L: system + numbered excerpts + question
+    L-->>GW: answer citing [n]
+    GW->>DB: store in cache
+    GW-->>U: answer + citations (cached: false)
+  end

@@ -1,0 +1,13 @@
+---
+config:
+  xyChart:
+    showDataLabel: true
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#1f7a4d"
+---
+xychart-beta
+  title "k6 load test: p95 latency (ms) vs threshold"
+  x-axis ["incidents p95 (5/s)", "incident threshold", "search p95 (20/s)", "search threshold"]
+  y-axis "milliseconds" 0 --> 2100
+  bar [314, 2000, 18, 300]

@@ -1,0 +1,20 @@
+flowchart TB
+  START([investigator node]) --> DISC[discover tools<br/>cached per token]
+  DISC --> MODE{LLM enabled?}
+  MODE -->|yes| LLMCALL[model.bind_tools · invoke<br/>record tokens + cost]
+  MODE -->|no / LLM error| SCRIPT[scripted plan step]
+  LLMCALL --> COST{cost ≥ $0.50?}
+  COST -->|yes| STOPC[stop: cost_cap]
+  COST -->|no| ANY{tool calls in reply?}
+  SCRIPT --> ANY
+  ANY -->|no| STOPD[stop: done]
+  ANY -->|yes| TOOLS([tools node])
+  TOOLS --> ALLOW[allowed = 8 − used]
+  ALLOW --> RUN[run allowed calls in parallel<br/>span execute_tool per call]
+  ALLOW --> SKIP[answer the rest 'skipped'<br/>stop: step_cap]
+  RUN --> SAN[sanitize: PII → injection<br/>wrap untrusted_tool_output]
+  SAN --> EVD[evidence from tool output]
+  EVD --> CAP{used ≥ 8?}
+  CAP -->|yes| STOPS[stop: step_cap]
+  CAP -->|no| START
+  STOPC & STOPD & STOPS & SKIP --> TRI([triage → rca])

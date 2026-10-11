@@ -1,0 +1,25 @@
+flowchart LR
+  subgraph docker["Docker (compose)"]
+    PG[(Postgres + pgvector :5432)]
+    KF[(Kafka :9092)]
+    RD[(Redis :6379)]
+    JG[Jaeger :16686]
+    PR[Prometheus :9090<br/>alert rules]
+    AM[Alertmanager :9093]
+    GF[Grafana :3001]
+  end
+  subgraph host["Host processes (scripts/dev-local.sh)"]
+    WEB[web :3000] --> GW[gateway :8080] --> AG[agent :8000] --> MO[mcp-observability :8200] --> CK[checkout :8101] --> INV[inventory :8102]
+    AG --> MR[mcp-remediation :8300] --> CK
+    LG[loadgen] --> CK
+    ING[ingestion :8090]
+  end
+  GW --> PG & KF & RD
+  MR --> RD
+  ING --> PG & KF
+  AG --> PG
+  GW & AG & MO -.traces.-> JG
+  PR -.scrapes.-> GW & AG & ING & CK
+  PR --> AM -->|webhook| GW
+  GF --> PR
+  OL[(Ollama gemma4 :11434)] -.optional.- AG & GW

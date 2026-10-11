@@ -1,0 +1,30 @@
+flowchart LR
+  subgraph public["gateway /api/v1 · user JWT · 120 req/min per tenant"]
+    I1[GET /incidents]
+    I2[POST /incidents]
+    I3["GET /incidents/{id}"]
+    I4["POST /incidents/{id}/decision"]
+    K1[POST /knowledge/documents]
+    K2[GET /knowledge/search]
+    A1[POST /ask]
+  end
+  subgraph alerts["gateway /api/v1/alerts · integration token only"]
+    W1[POST /alerts/alertmanager]
+  end
+  subgraph mcp["gateway /mcp · tool token only"]
+    M1[search_runbooks]
+  end
+  subgraph internal["agent :8000 · internal, network-restricted"]
+    G1[POST /incidents]
+    G2["GET /tenants/{t}/incidents/{id}"]
+    G3["POST /tenants/{t}/incidents/{id}/decision"]
+  end
+  subgraph rem["mcp-remediation :8300 · capability per call · agent only"]
+    R1[rollback · restart · increase_pool<br/>failover · scale_out]
+  end
+  I2 --> G1
+  W1 -. background .-> G1
+  I3 --> G2
+  I4 --> G3
+  G1 -. tool calls .-> M1
+  G3 -. approved action .-> R1

@@ -1,0 +1,47 @@
+{{- if .Values.chaosLab.enabled }}
+{{- range $i, $svc := .Values.chaosLab.services }}
+{{- $ctx := dict "root" $ "name" $svc }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Release.Name }}-{{ $svc }}
+  labels: {{- include "sentinel.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $svc }}
+    sentinel.dev/role: chaos-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "sentinel.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "sentinel.selector" $ctx | nindent 8 }}
+        sentinel.dev/role: chaos-lab
+    spec:
+      securityContext: {{- toYaml $.Values.podSecurity | nindent 8 }}
+      containers:
+        - name: {{ $svc }}
+          image: {{ include "sentinel.image" (dict "root" $ "name" $svc "image" "chaos-lab") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports: [{ name: http, containerPort: 8000 }]
+          env:
+            - { name: SERVICE_NAME, value: {{ $svc }} }
+            {{- if eq $i 0 }}{{ with index $.Values.chaosLab.services 1 }}
+            - { name: DOWNSTREAM_URL, value: "http://{{ $.Release.Name }}-{{ . }}:8000" }
+            {{- end }}{{ end }}
+          securityContext: {{- include "sentinel.containerSecurity" $ | nindent 12 }}
+          readinessProbe: { httpGet: { path: /healthz, port: http } }
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 256Mi } }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Release.Name }}-{{ $svc }}
+  labels: {{- include "sentinel.labels" $ | nindent 4 }}
+spec:
+  selector: {{- include "sentinel.selector" $ctx | nindent 4 }}
+  ports: [{ name: http, port: 8000, targetPort: http }]
+{{- end }}
+{{- end }}

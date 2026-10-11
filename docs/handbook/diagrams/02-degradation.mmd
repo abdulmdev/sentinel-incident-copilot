@@ -1,0 +1,9 @@
+flowchart TB
+  F1[LLM down or failing] --> R1[Investigator → scripted plan<br/>Triage/RCA → rules<br/>/ask → 503/429/502]
+  F2[A tool or MCP server fails] --> R2[Error result recorded<br/>investigation continues<br/>interlocks may escalate]
+  F3[Redis down] --> R3[Rate limits: per-instance buckets<br/>Execution: refused, fails closed]
+  F4[Kafka down] --> R4[Upload returns 503<br/>never silently dropped]
+  F5[Agent unreachable] --> R5[Incident marked FAILED<br/>503 to caller]
+  F6[Agent pod dies mid-incident] --> R6[Resume from Postgres<br/>checkpoint on any replica]
+  F7[Remediation adapter down] --> R7[REMEDIATION_FAILED<br/>incident stays open for a human]
+  F8[Gateway down for Alertmanager] --> R8[Alertmanager retries<br/>delivered when back]
