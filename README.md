@@ -1,6 +1,8 @@
 # Sentinel: an agentic incident-response copilot
 
-> **Start here:** [engineering handbook](docs/handbook/README.md) (HLD, LLD, operations, history) · [system design](docs/DESIGN.md) · [demo script](docs/DEMO.md) · [benchmark report](evals/rca/REPORT.md) · [ADRs](docs/adr/)
+[![CI](https://github.com/abdulmdev/sentinel-incident-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/abdulmdev/sentinel-incident-copilot/actions/workflows/ci.yml)
+
+> **Start here:** [user guide](docs/USER-GUIDE.md) · [engineering handbook](docs/handbook/README.md) (HLD, LLD, operations, history) · [system design](docs/DESIGN.md) · [demo script](docs/DEMO.md) · [benchmark report](evals/rca/REPORT.md) · [ADRs](docs/adr/)
 
 Sentinel is an on-call copilot that closes the loop. When an alert fires, an incident opens by itself (deduplicated and correlated). A LangGraph agent collects evidence (deploys, error logs, metrics, runbooks), ranks root-cause hypotheses with citations, and proposes a remediation. **Nothing runs until a human approves it.** Approval mints a **single-use capability** for exactly that action, which a deploy-tool adapter executes once. The agent then **verifies recovery** with real traffic, records the **time to mitigate**, and writes the postmortem.
 

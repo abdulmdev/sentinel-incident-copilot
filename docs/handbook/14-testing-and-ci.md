@@ -135,7 +135,10 @@ Each metric's definition, including the edge cases: wrong escalation isn't harmf
 | `images` (main only; needs kind-e2e, eval-gate) | Build jars + fetch the model; multi-arch (amd64/arm64) buildx; push `ghcr.io/<owner>/sentinel-<name>:<sha>`; GHA cache | — |
 | `llm-eval` (manual `workflow_dispatch`) | `run.py --mode llm --max-usd 80 --check` with the `ANTHROPIC_API_KEY` secret (skips with a warning if absent) | Claude thresholds |
 
-Status: the workflow is validated as YAML and every step's command has been run locally, but the workflow has **not executed on GitHub yet**: the repository hasn't been pushed.
+**Status (2026-10-11):** the repository is public at [github.com/abdulmdev/sentinel-incident-copilot](https://github.com/abdulmdev/sentinel-incident-copilot).
+- The **first run on GitHub passed every job on the first attempt** ([run](https://github.com/abdulmdev/sentinel-incident-copilot/actions/runs/38108334519), about 10 minutes wall-clock): all test suites, eval gate, docs, web, deploy-config (including the least-privilege check), kind-e2e (approve → `RESOLVED` in-cluster, NetworkPolicy denials).
+- The multi-arch `images` job published all 7 images to GHCR.
+- `llm-eval` is skipped by design (manual, needs an `ANTHROPIC_API_KEY` secret).
 
 ## 4. Live closed-loop scenario (Phase 7)
 

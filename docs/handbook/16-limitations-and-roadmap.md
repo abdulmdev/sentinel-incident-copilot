@@ -25,7 +25,6 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 | Observability | ingestion-service and mcp-remediation aren't traced (the adapter has a JSON audit log); no log aggregation; alert rules exist for the lab services but not SLOs for Sentinel itself | Gaps when debugging ingestion | OTel in both; Loki; SLOs for incident latency, error rate and TTM |
 | Images | Java images ~1.2 GB (ONNX natives for all platforms + model) | Slow pulls/scale-up | Platform-specific natives, jlink, a model layer shared via a volume or init container |
 | Deployment | Terraform validated, never applied; ESO/ALB/OTel Collector assumed | Unknown apply-time issues | Apply in a sandbox account; add the add-ons via Helm/Terraform |
-| CI | Workflow never ran on GitHub (repo not pushed) | Unknown runner-specific failures | Push and iterate |
 | Data | No retention or deletion policy for incidents, the cache, checkpoints | Unbounded growth; data-protection obligations | TTL jobs; tenant deletion workflow |
 | Product | Alertmanager only (no PagerDuty/Opsgenie) | Teams on other tools open incidents by hand | Further receivers on the same `AlertService` |
 
@@ -36,11 +35,11 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 *Figure 16.1: Roadmap items by impact and effort*
 
 1. **Fill the LLM columns** (gemma4 full run; Claude when a key is available) and record them in chapter 11.
-2. **Push to GitHub**, make CI green, publish images.
-3. **Real-world benchmark data:** record chaos-lab incidents; import anonymized postmortems.
-4. **Identity, next:** KMS-backed signing; mTLS/SPIFFE between pods; egress NetworkPolicies.
-5. **Closed loop, next:** async approval with streamed progress; dependency-aware alert correlation; closed-loop scenarios in CI; a real deploy-system adapter with mandatory dry run.
-6. **Scale and cost:** pooled MCP sessions, reranker, slimmer images, apply Terraform in a sandbox.
+2. **Real-world benchmark data:** record chaos-lab incidents; import anonymized postmortems.
+3. **Identity, next:** KMS-backed signing; mTLS/SPIFFE between pods; egress NetworkPolicies.
+4. **Closed loop, next:** async approval with streamed progress; dependency-aware alert correlation; closed-loop scenarios in CI; a real deploy-system adapter with mandatory dry run.
+5. **Scale and cost:** pooled MCP sessions, reranker, slimmer images, apply Terraform in a sandbox.
 
 *Done in Phase 7 (removed from this list):* alert webhooks, and remediation execution behind interlocks with capability tokens, verification and audit.
+*Done (Phase 8):* pushed to GitHub with CI green and images published.
 *Done in Phase 8:* OIDC users, asymmetric (ES256) service tokens with a JWKS, gateway ↔ agent service identity, checkpoint RLS, revocable integration tokens.

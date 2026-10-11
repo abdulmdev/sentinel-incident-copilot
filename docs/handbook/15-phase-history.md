@@ -342,6 +342,8 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 | Observability tests: FastMCP's session manager runs once per process; then 421 for the test client's `Host` | Writing the middleware tests | One module-scoped client on `127.0.0.1` |
 | An expired token raised Nimbus's `BadJwtException` instead of Spring's validation exception | Gateway tests | Accept either: both reject; the Nimbus processor checks expiry first |
 | `dev_token.py` used `list[str] \| None` and broke on macOS's Python 3.9 | Running it | `from __future__ import annotations` |
+| **Startups weren't offline-capable:** Spring AI fetched the embedding tokenizer from GitHub on every start (the images baked only the model). After a reboot cleared the cache, ingestion timed out | Restarting the stack after a reboot | `SENTINEL_TOKENIZER_URI` → the copy bundled in the Spring AI jar; the Dockerfile comment now matches reality |
+| The first `git add` staged the Terraform provider cache (782 MB) | Measuring the commit before pushing | `.terraform/`, state files, `.logs/` and `web/.next/` ignored; staged files secret-scanned before the push |
 
 ![Phase 8: the console after OIDC sign-in, with the tenant admin's Integrations page: Alertmanager's gateway-issued token, its last use, and Revoke](images/screens/console-integrations.png)
 
@@ -362,6 +364,7 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
   | integration token on the incidents API | 403 |
 
 - **Live closed loop with OIDC:** fault → alert (gateway-issued integration token) → incident → alice signs in through Keycloak → approve → rollback → verified, **mitigated in 41 s**.
+- **Published:** [github.com/abdulmdev/sentinel-incident-copilot](https://github.com/abdulmdev/sentinel-incident-copilot) (public). **The first GitHub Actions run passed every job on the first try**, including kind-e2e and multi-arch images to GHCR.
 - **On kind:**
   - approve → `RESOLVED`, with ES256 tokens verified in-cluster;
   - the agent rejects unauthenticated calls;

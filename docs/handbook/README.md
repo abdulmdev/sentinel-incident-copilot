@@ -24,7 +24,7 @@ The complete reference for Sentinel: what it is, how it's designed (high level a
 - [`docs/Sentinel-Handbook.pdf`](../Sentinel-Handbook.pdf): A4, cover, contents, page numbers.
 - [`Sentinel-Handbook.html`](Sentinel-Handbook.html): self-contained, opens in any browser.
 
-Shorter companions: the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the nine [architecture decision records](../adr/).
+Shorter companions: the [user guide](../USER-GUIDE.md), the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the nine [architecture decision records](../adr/).
 
 ## Figures
 The handbook has **65 diagrams and charts** (architecture, sequence, state, ER, deployment, flowcharts, data charts) and **13 screenshots of the running system** (console incl. the closed loop, Jaeger, Grafana, Prometheus targets and alerts). Every figure is numbered and captioned.
