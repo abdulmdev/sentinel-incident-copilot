@@ -343,6 +343,7 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 | An expired token raised Nimbus's `BadJwtException` instead of Spring's validation exception | Gateway tests | Accept either: both reject; the Nimbus processor checks expiry first |
 | `dev_token.py` used `list[str] \| None` and broke on macOS's Python 3.9 | Running it | `from __future__ import annotations` |
 | **Startups weren't offline-capable:** Spring AI fetched the embedding tokenizer from GitHub on every start (the images baked only the model). After a reboot cleared the cache, ingestion timed out | Restarting the stack after a reboot | `SENTINEL_TOKENIZER_URI` → the copy bundled in the Spring AI jar; the Dockerfile comment now matches reality |
+| **The LLM benchmark silently scored the rules fallback as "gemma4":** Ollama dropped mid-resume, and 51 scenarios "finished" in 3.7 s | Reading the result before reporting it (0.1 s per incident is impossible for an 8B model) | Contaminated output discarded and the genuine 61 results restored; the runner flags `llm_unavailable` scenarios, doesn't save them, and refuses to record a run containing any (`test_runner.py`) |
 | The first `git add` staged the Terraform provider cache (782 MB) | Measuring the commit before pushing | `.terraform/`, state files, `.logs/` and `web/.next/` ignored; staged files secret-scanned before the push |
 
 ![Phase 8: the console after OIDC sign-in, with the tenant admin's Integrations page: Alertmanager's gateway-issued token, its last use, and Revoke](images/screens/console-integrations.png)
@@ -350,7 +351,7 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 *Figure 15.8: Phase 8: the console after OIDC sign-in, with the tenant admin's Integrations page: Alertmanager's gateway-issued token, its last use, and Revoke*
 
 **Results** (2026-10-06 → 10-11):
-- **206 tests** pass (gateway 94, agent 64 with Postgres, mcp-remediation 14, eval scorer 12, mcp-observability 12, ingestion 10). Both benchmark gates pass; the console builds; chart and Terraform validate; the least-privilege check passes and fails when an agent is given the secret.
+- **208 tests** pass (gateway 94, agent 64 with Postgres, mcp-remediation 14, eval scorer + runner 14, mcp-observability 12, ingestion 10). Both benchmark gates pass; the console builds; chart and Terraform validate; the least-privilege check passes and fails when an agent is given the secret.
 - **Live probes:**
 
   | Probe | Result |

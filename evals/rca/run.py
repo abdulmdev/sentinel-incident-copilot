@@ -75,7 +75,7 @@ class Progress:
 
 
 async def run_one(scenario: dict, index: RunbookIndex, sem: asyncio.Semaphore,
-                  progress: Progress | None = None) -> dict:
+                  progress: Progress | None = None, require_llm: bool = False) -> dict:
     async with sem:
         toolbox = ReplayToolBox(scenario, index)
         graph = agent_graph.build_graph(toolbox, InMemorySaver())
@@ -92,6 +92,12 @@ async def run_one(scenario: dict, index: RunbookIndex, sem: asyncio.Semaphore,
         result = {"id": scenario["id"], "family": scenario["family"], "difficulty": scenario["difficulty"],
                   "expected": scenario["expected"], "score": score(scenario, state), "latency_ms": latency_ms,
                   "tool_calls": toolbox.calls, "error": error}
+        # The agent degrades to rules when the model is unreachable: right for production, wrong for an LLM
+        # benchmark, where it would silently score the rules under the model's name (it happened: Ollama
+        # dropped mid-run and 51 "gemma4" results were the rule fallback).
+        if require_llm and not error and not state.get("llm_calls"):
+            result["error"] = "LLM unavailable: no model call succeeded (agent fell back to rules)"
+            result["llm_unavailable"] = True
         if progress:
             progress.tick(result)
         return result
@@ -258,11 +264,18 @@ async def main() -> int:
     progress = Progress(len(scenarios)) if args.mode == "llm" else None  # baseline takes ~1 s: no need
 
     async def run_and_save(s):
-        r = await run_one(s, index, sem, progress)
-        with partial.open("a") as f:
-            f.write(json.dumps(r, default=str) + "\n")
+        r = await run_one(s, index, sem, progress, require_llm=args.mode == "llm")
+        if not r.get("llm_unavailable"):  # not saved, so --resume retries it once the model is back
+            with partial.open("a") as f:
+                f.write(json.dumps(r, default=str) + "\n")
         return r
     results = done + list(await asyncio.gather(*(run_and_save(s) for s in scenarios)))
+    unavailable = [r for r in results if r.get("llm_unavailable")]
+    if unavailable:
+        print(f"\n{len(unavailable)} scenarios ran without the model (unreachable?), e.g. {unavailable[0]['id']}. "
+              f"Nothing recorded: fix the provider and re-run with --resume "
+              f"({len(results) - len(unavailable)} results are saved).")
+        return 3
     summary = summarize(results)
     out = {"mode": args.mode, "run": run_name,
            "model": agent_llm.model_for("investigate") if args.mode == "llm" else None,

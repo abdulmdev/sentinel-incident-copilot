@@ -1,13 +1,13 @@
 # 14 Testing and CI
 
-**206 automated tests** (measured 2026-10-11, end of Phase 8):
+**208 automated tests** (measured 2026-10-11, end of Phase 8):
 
 | Suite | Tests |
 |---|---|
 | gateway | 94 (68 unit/slice + 26 integration) |
 | agent | 64 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
 | mcp-remediation | 14 |
-| eval scorer | 12 |
+| eval scorer + runner | 14 |
 | mcp-observability | 12 |
 | ingestion | 10 (7 + 3) |
 
@@ -114,8 +114,8 @@ The capability check (`tests/test_capabilities.py`):
 - **replay store down → refused (fails closed)**;
 - the pool size is bounded by the runbook; `scale_out` is bounded (≤ 10 replicas) and needs its own capability.
 
-### Eval scorer (12)
-Each metric's definition, including the edge cases: wrong escalation isn't harmful; a runbook-only conclusion isn't grounded; `unknown` isn't scored for grounding; targets matter when labeled; a crashed run is a miss; policy override is scored both ways; a dropped citation is unfaithful; PII detection in transcript or evidence; the offline BM25 index finds the right runbook.
+### Eval scorer and runner (14)
+Each metric's definition, including the edge cases: wrong escalation isn't harmful; a runbook-only conclusion isn't grounded; `unknown` isn't scored for grounding; targets matter when labeled; a crashed run is a miss; policy override is scored both ways; a dropped citation is unfaithful; PII detection in transcript or evidence; the offline BM25 index finds the right runbook. Runner (`test_runner.py`): **an LLM-mode scenario in which no model call succeeded is flagged `llm_unavailable`, not scored**; a rules run is a valid baseline result.
 
 ## 3. CI (`.github/workflows/ci.yml`)
 

@@ -67,7 +67,7 @@ This document is the design review: what it does, how it's built, why, and how w
 
 | Evidence | Where |
 |---|---|
-| 206 automated tests (unit, integration on real pgvector/Redis via Testcontainers, concurrency on real Postgres, durability across processes, capability attacks, tracing, guardrails, scorer) | each service, `evals/rca/test_scoring.py` |
+| 208 automated tests (unit, integration on real pgvector/Redis via Testcontainers, concurrency on real Postgres, durability across processes, capability attacks, tracing, guardrails, scorer) | each service, `evals/rca/test_scoring.py` |
 | RCA benchmark: 112 replayed incidents incl. red herrings, outages, cascades, novel faults, prompt injection; deterministic scoring; held-out set | [`evals/rca/REPORT.md`](../evals/rca/REPORT.md) |
 | Baseline: 93% correct remediation, **0% harmful actions, 0% successful injections, 0% PII leaks**; gate fails CI on regression (verified by re-introducing a bug) | same |
 | Load: incidents p95 314 ms at 5/s, search p95 18 ms at 20/s, distributed limiter admits exactly its capacity under a 200-request burst | [`docs/load-test.md`](load-test.md) |

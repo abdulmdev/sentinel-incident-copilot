@@ -142,6 +142,9 @@ The 8 misses are `db_pool`/`memory_leak` with logs down. The rules can't diagnos
 
   A full run was started, then stopped at about 45/112 after 22 minutes. It wasn't saved because results were then only written at the end; now they're saved per incident.
 - **Claude:** pending; needs `ANTHROPIC_API_KEY`.
+- **Guard against silent fallback (2026-10-11).** The agent degrades to rules when the model is unreachable, which is right in production but wrong in an LLM benchmark. When Ollama dropped mid-run, 51 scenarios finished in 3.7 s and were recorded as "gemma4".
+  - The contaminated output was discarded; the 61 genuine results (63–118 s each) are kept for `--resume`.
+  - The runner now flags any LLM-mode scenario without a successful model call as `llm_unavailable`. It doesn't save it (resume retries it), and when any are flagged it writes no results, history or report and exits 3.
 
 ## 3. Retrieval eval (`evals/retrieval/`)
 20 labeled questions against the live gateway; chunks are deduplicated to documents before ranking. Results (Phase 2): vector 0.90 / 1.00 / 0.950, keyword 0.95 / 1.00 / 0.975, hybrid 0.95 / 1.00 / 0.975 (recall@1 / recall@5 / MRR). Too small to separate the modes significantly; the set should grow to ~100.
