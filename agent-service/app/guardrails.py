@@ -8,8 +8,10 @@ Inputs (tool output, before any model or checkpoint sees it):
 Outputs (RCA, before a human sees it):
   - validate_citations: every citation must name evidence gathered in this run. Recognizable
     formats are normalized ("[logs:checkout] ERROR ..." -> "logs:checkout"); anything else is dropped.
-  - enforce_policy: remediation interlocks from the runbooks, e.g. no rollback without a deploy
-    inside the suspect window. Violations are downgraded to `escalate`, never silently changed.
+  - enforce_policy: remediation interlocks from the runbooks: no rollback without a running deploy
+    inside the suspect window, and no other disruptive action without its precondition observed in the
+    target's telemetry (pool saturation for increase_pool, memory growth for restart, upstream trouble
+    for failover). Violations are downgraded to `escalate`, never silently changed.
 
 Every intervention becomes a guardrail event in state, so evals can report raw vs. guarded behavior.
 """
@@ -122,6 +124,36 @@ def validate_citations(rca: RcaResult, evidence: list[Evidence]) -> tuple[RcaRes
     return rca, events
 
 
+# Runbook preconditions for disruptive actions other than rollback (which has the deploy window).
+# A fix is only proposed for production when the target's own telemetry shows the condition it fixes.
+# Thresholds come from the runbooks and alert rules, not from any benchmark case: the pool's documented
+# maximum (20, db-connection-pool runbook) and the MemoryGrowth alert (300 MB, deploy/prometheus/alerts.yml).
+# Found by the full gemma4 run: it proposed restart for TLS/Kafka failures and increase_pool with no
+# pool signal; 13 of 112 harmful proposals passed the earlier interlocks.
+PRECONDITIONS: dict[str, tuple[tuple[str, ...], tuple[tuple[str, float], ...], str]] = {
+    "increase_pool": (("timeout acquiring DB connection",), (("chaos_db_pool_in_use", 20.0),),
+                      "DB pool saturation"),
+    "restart": (("GC pause exceeded",), (("chaos_memory_mb", 300.0),), "memory growth or long GC pauses"),
+    "failover": (("upstream returned 503", "slow upstream call"), (), "upstream errors or latency"),
+}
+_METRIC = re.compile(r"([a-z_]+)=([0-9.]+)")
+
+
+def _precondition_observed(action: str, service: str, evidence: list[Evidence]) -> bool:
+    signatures, thresholds, _ = PRECONDITIONS[action]
+    for e in evidence:
+        kind, _, svc = e.source.partition(":")
+        if svc != service or kind == "runbook":  # runbook prose describes possible failures, not observations
+            continue
+        if any(sig in e.detail for sig in signatures):
+            return True
+        if kind == "metrics":
+            values = {k: float(v) for k, v in _METRIC.findall(e.detail)}
+            if any(values.get(name, 0.0) >= limit for name, limit in thresholds):
+                return True
+    return False
+
+
 def _recent_deploy(service: str, evidence: list[Evidence], opened_at: datetime) -> bool:
     for e in evidence:
         # Only a running deploy counts: not "no recent deployments", a rollback, or a rolled-back build.
@@ -154,6 +186,9 @@ def enforce_policy(incident: Incident, rca: RcaResult, evidence: list[Evidence])
     elif rem.action == "rollback" and not _recent_deploy(rem.target, evidence, incident.opened_at):
         reason = (f"no deploy of {rem.target!r} within {int(DEPLOY_SUSPECT_WINDOW.total_seconds() // 60)} "
                   "minutes before the alert (runbook: roll back only deploy-correlated incidents)")
+    elif rem.action in PRECONDITIONS and not _precondition_observed(rem.action, rem.target, evidence):
+        reason = (f"no {PRECONDITIONS[rem.action][2]} observed on {rem.target!r} "
+                  f"(runbook: {rem.action} only when its precondition shows in telemetry)")
     if reason is None:
         return rca, events
     events.append({"type": "action_overridden", "from": rem.action, "target": rem.target, "reason": reason})

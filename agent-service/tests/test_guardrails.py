@@ -89,8 +89,9 @@ def test_action_on_a_service_never_investigated_is_blocked():
 
 
 def test_unambiguous_free_text_target_is_mapped_to_the_service():
+    gc = Evidence(source="logs:checkout", detail="WARN x9: GC pause exceeded threshold")  # restart's precondition
     fixed, events = guardrails.enforce_policy(
-        INCIDENT, rca("restart", target="checkout database connection pool"), [LOGS])
+        INCIDENT, rca("restart", target="checkout database connection pool"), [LOGS, gc])
     assert fixed.remediation.action == "restart" and fixed.remediation.target == "checkout"
     assert events == [{"type": "target_normalized", "from": "checkout database connection pool", "to": "checkout"}]
 
@@ -119,3 +120,43 @@ def test_rollback_is_not_justified_by_a_rollback_or_a_rolled_back_build():
 def test_no_recent_deployments_does_not_satisfy_the_rollback_interlock():
     e = Evidence(source="deploys:checkout", detail="no recent deployments")
     assert not guardrails._recent_deploy("checkout", [e], datetime.fromisoformat("2026-10-05T10:05:00+00:00"))
+
+
+# --- runbook preconditions for disruptive actions ----------------------------------------------
+
+def _decide(action, *evidence):
+    out, events = guardrails.enforce_policy(INCIDENT, rca(action), [LOGS, *evidence])
+    return out.remediation.action, events
+
+
+def test_disruptive_actions_need_their_precondition_in_the_targets_telemetry():
+    """The full gemma4 run proposed restart for TLS/Kafka failures and increase_pool with no pool signal."""
+    healthy = Evidence(source="metrics:checkout", detail="chaos_db_pool_in_use=4.0; chaos_memory_mb=184.0")
+    for action in ("increase_pool", "restart", "failover"):
+        decided, events = _decide(action, healthy)
+        assert decided == "escalate", action
+        assert "observed on 'checkout'" in events[-1]["reason"]
+
+
+def test_a_log_signature_satisfies_the_precondition():
+    pool = Evidence(source="logs:checkout", detail="ERROR x40: timeout acquiring DB connection {'pool_max': 20}")
+    gc = Evidence(source="logs:checkout", detail="WARN x9: GC pause exceeded threshold")
+    upstream = Evidence(source="logs:checkout", detail="ERROR x30: upstream returned 503")
+    assert _decide("increase_pool", pool)[0] == "increase_pool"
+    assert _decide("restart", gc)[0] == "restart"
+    assert _decide("failover", upstream)[0] == "failover"
+
+
+def test_metrics_alone_satisfy_it_when_logs_are_down():
+    """Logs-down incidents must still be fixable from metrics, at the runbook/alert thresholds."""
+    saturated = Evidence(source="metrics:checkout", detail='chaos_requests_total{status="error"}=559.0; chaos_db_pool_in_use=20.0')
+    leaking = Evidence(source="metrics:checkout", detail="chaos_memory_mb=2388.0; chaos_db_pool_in_use=6.0")
+    assert _decide("increase_pool", saturated)[0] == "increase_pool"
+    assert _decide("restart", leaking)[0] == "restart"
+    assert _decide("increase_pool", leaking)[0] == "escalate"   # memory is high, the pool is not
+
+
+def test_runbook_text_and_other_services_never_count_as_observations():
+    runbook = Evidence(source="runbook:db-connection-pool", detail="Symptom: timeout acquiring DB connection")
+    other = Evidence(source="logs:inventory", detail="ERROR x40: timeout acquiring DB connection")
+    assert _decide("increase_pool", runbook, other)[0] == "escalate"

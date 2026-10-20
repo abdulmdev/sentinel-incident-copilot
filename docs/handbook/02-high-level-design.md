@@ -167,6 +167,7 @@ Defense in depth, in order:
 4. **Output validation:** citations must name gathered evidence.
 5. **Policy interlocks:**
    - no rollback without a *running* deploy in the 30-minute window: a rollback record or an already-rolled-back build doesn't count, and neither does unavailable deploy history;
+   - no `increase_pool`, `restart` or `failover` unless its precondition (pool saturation, memory growth, upstream trouble) shows in the target's own telemetry;
    - no action on an uninvestigated service.
 6. **Human approval.**
 7. **Capability:** the approval authorizes one operation on one service, once, for 5 minutes; the adapter enforces it, failing closed.

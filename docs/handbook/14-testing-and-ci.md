@@ -1,11 +1,11 @@
 # 14 Testing and CI
 
-**208 automated tests** (measured 2026-10-11, end of Phase 8):
+**212 automated tests** (measured 2026-10-20):
 
 | Suite | Tests |
 |---|---|
 | gateway | 94 (68 unit/slice + 26 integration) |
-| agent | 64 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
+| agent | 68 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
 | mcp-remediation | 14 |
 | eval scorer + runner | 14 |
 | mcp-observability | 12 |
@@ -92,7 +92,7 @@ uv run --project agent-service python evals/rca/run.py --check
 | `test_incident_flow.py` (13) | Scripted investigation's tool sequence, rollback, grounded citations; runbooks cited only when they name the signature; the runbook query is built from symptoms; runbook text never triggers rules; **tool token used but never persisted**; works without a token; a failing tool is recorded and policy escalates; approval → execution → verification → postmortem; rejection; decisions single-use; duplicate open 409; tenants isolated; **after a rollback, a new DB-pool incident is not rolled back again** (live-run regression) |
 | `test_remediation.py` (8) | Approval executes with the capability and verifies: RESOLVED, ordered timeline, time-to-mitigate; no capability → nothing executes (REMEDIATION_FAILED); a refused capability (already used) → failure, not success; **a fix that doesn't heal is caught by verification** after the configured attempts; an action the adapter can't perform fails with a clear error; approved `escalate` → ESCALATED with no capability use; rejection executes nothing; **the capability is never checkpointed** |
 | `test_investigation_budget.py` (5) | Step cap (exactly 8 executed); cost cap (stops before the second batch); clean finish; hallucinated tool → error result; LLM outage → scripted plan |
-| `test_guardrails.py` (12) | PII kinds incl. a Luhn check; **metric floats never redacted**; injection removed and counted, ordinary ops text untouched; citations normalized/dropped; rollback window; uninvestigated target blocked; free-text target mapped; RCA schema enum; escalation always passes; **a rollback record or a rolled-back build doesn't justify another rollback**; "no recent deployments" doesn't satisfy the interlock |
+| `test_guardrails.py` (16) | PII kinds incl. a Luhn check; **metric floats never redacted**; injection removed and counted, ordinary ops text untouched; citations normalized/dropped; rollback window; uninvestigated target blocked; free-text target mapped; RCA schema enum; escalation always passes; **a rollback record or a rolled-back build doesn't justify another rollback**; "no recent deployments" doesn't satisfy the interlock; **runbook preconditions**: `increase_pool`/`restart`/`failover` blocked without their signal in the target's telemetry, allowed by a log signature or (logs down) a metric at the runbook/alert threshold, never by runbook text or another service's signal |
 | `test_heuristics.py` (7) | Deploy suspect window boundaries (5, 30, 31, 360, −5 minutes); old deploy → no rollback; unparseable time stays a suspect |
 | `test_llm_providers.py` (2) | Ollama: local, free, no key, schema passed as `format`; Anthropic routing and pricing |
 | `test_toolbox_cache.py` (2) | Discovered once per token, never shared across tokens; TTL and LRU |

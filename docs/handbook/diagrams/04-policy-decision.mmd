@@ -4,8 +4,11 @@ flowchart TB
   E -->|no| T{target investigated?}
   T -->|no, but mentions exactly one service| MAP[map to that service<br/>event target_normalized] --> T2
   T -->|no| BLOCK1[escalate · target never investigated]
-  T -->|yes| T2{action = rollback?}
-  T2 -->|no| PASS
-  T2 -->|yes| D{"a running deploy of target with<br/>0 ≤ opened_at − deployed ≤ 30 min?<br/>(rollbacks and rolled-back builds don't count)"}
+  T -->|yes| T2{which action?}
+  T2 -->|rollback| D{"a running deploy of target with<br/>0 ≤ opened_at − deployed ≤ 30 min?"}
   D -->|yes, or time unparseable| PASS
-  D -->|no deploy evidence, none running, or too old| BLOCK2[escalate · no recent deploy<br/>runbook: roll back only deploy-correlated incidents]
+  D -->|no| BLOCK2[escalate · no recent deploy]
+  T2 -->|increase_pool · restart · failover| P{"its precondition observed in the<br/>target's logs or metrics?<br/>(pool ≥ 20 · memory ≥ 300 MB · upstream 5xx/latency)"}
+  P -->|yes| PASS
+  P -->|no; runbook text doesn't count| BLOCK3[escalate · no precondition observed]
+  T2 -->|scale_out| PASS

@@ -254,6 +254,15 @@ For each citation: strip a leading `[...]` wrapper. If it's still unknown, take 
 2. **Interlocks** (any non-escalate action):
    - the target must be an investigated service, else blocked ("target was never investigated");
    - `rollback` requires a `deploys:<target>` evidence item that is a **running deploy** ("deployment completed …", not a rollback record or a rolled-back build) inside the suspect window, else blocked ("no deploy … within 30 minutes … (runbook: roll back only deploy-correlated incidents)"). This also blocks when deploy history is unavailable or empty: there's nothing verified to roll back to.
+   - **Runbook preconditions (2026-10-20):** `increase_pool`, `restart` and `failover` need the condition they fix to be **observed in the target's own telemetry**. Runbook text and other services' signals don't count:
+
+     | Action | Log signature | Or metric |
+     |---|---|---|
+     | `increase_pool` | `timeout acquiring DB connection` | `chaos_db_pool_in_use` ≥ 20 (the runbook's pool size) |
+     | `restart` | `GC pause exceeded` | `chaos_memory_mb` ≥ 300 (the `MemoryGrowth` alert) |
+     | `failover` | `upstream returned 503` or `slow upstream call` | — |
+
+     Otherwise the action is blocked ("no … observed on 'svc'"). Metrics alone suffice, so logs-down incidents stay fixable. Found by the full gemma4 run (chapter 11 §2.3): it proposed `restart` for TLS-certificate and Kafka failures, and `increase_pool` with no pool signal. The rule baseline is unaffected (its actions always come from these signatures).
 3. A block **downgrades to `escalate`** (risk low) with the reason prepended to the original rationale, and records `action_overridden{from, target, reason}`. It never rewrites silently.
 
 ## 8. Evidence (`evidence.py`)
