@@ -139,7 +139,7 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 - **Reasoning off = 3× faster** with the same answer on the pilot cases.
 - It **also falls for the red herring**: it proposed rolling back the 6-hour-old deploy.
 
-**Status:** the full run was started and then stopped by the user at ~45/112 after 22 minutes. Results were lost, because they were only written at the end. **Fixed:** per-incident persistence (`--resume`), live progress with an ETA, and `--sample N` (stratified). The full run is pending.
+**Status:** the full run was started and then stopped at ~45/112 after 22 minutes. Results were lost, because they were only written at the end. **Fixed:** per-incident persistence (`--resume`), live progress with an ETA, and `--sample N` (stratified). The full run is pending.
 
 ---
 

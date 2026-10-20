@@ -13,8 +13,8 @@ Sentinel does that loop for you, with a human in control:
 It also answers on-call questions from your team's runbooks ("Ask"), with citations.
 
 Who it's for:
-- on-call/SRE teams who want faster, safer incident response;
-- as a portfolio project, a demonstration of production-grade AI engineering: agents, RAG, evals, guardrails, security, observability, Kubernetes.
+- on-call and SRE teams who want faster, safer incident response;
+- platform teams who want a reference design for letting an AI agent act on production safely: approval gates, single-use capabilities, verification, evaluation and audit.
 
 ## Start it (local, about 3 minutes)
 Prerequisites: Docker Desktop, Java 21+, Maven, [uv](https://docs.astral.sh/uv/), Node 24. Optional: [Ollama](https://ollama.com) for a free local LLM.
