@@ -1,0 +1,16 @@
+name: Feature or idea
+description: Propose an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem, in on-call terms
+      description: What situation is painful or unsafe today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: If it affects what the agent may do, how is it kept safe (approval, capability, precondition, eval)?

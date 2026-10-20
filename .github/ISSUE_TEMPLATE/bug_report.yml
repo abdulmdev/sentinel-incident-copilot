@@ -1,0 +1,29 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands, fault injected (chaos-lab), incident id, logs from .logs/ if relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options: [gateway-service, agent-service, ingestion-service, mcp-tools, web console, deploy (compose/Helm/Terraform), evals, docs]
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: How you ran it
+      placeholder: "dev-local.sh / docker compose / kind; LLM provider (none, ollama, anthropic)"

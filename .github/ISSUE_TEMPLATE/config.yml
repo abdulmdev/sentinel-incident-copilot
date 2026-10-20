@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/abdulmdev/sentinel-incident-copilot/security/advisories/new
+    about: Please report security issues privately.
+  - name: Engineering handbook
+    url: https://abdulmdev.github.io/sentinel-incident-copilot/handbook/Sentinel-Handbook.html
+    about: Architecture, operations and design decisions.

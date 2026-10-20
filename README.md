@@ -13,8 +13,9 @@
 ![MCP](https://img.shields.io/badge/MCP-tools-000000)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-Helm-326CE5?logo=kubernetes&logoColor=white)
 ![Terraform](https://img.shields.io/badge/Terraform-AWS-844FBA?logo=terraform&logoColor=white)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-[User guide](docs/USER-GUIDE.md) · [Engineering handbook](docs/handbook/README.md) ([PDF](docs/Sentinel-Handbook.pdf)) · [System design](docs/DESIGN.md) · [ADRs](docs/adr/) · [Benchmark report](evals/rca/REPORT.md)
+[Website](https://abdulmdev.github.io/sentinel-incident-copilot/) · [User guide](docs/USER-GUIDE.md) · [Engineering handbook](docs/handbook/README.md) ([PDF](docs/Sentinel-Handbook.pdf)) · [System design](docs/DESIGN.md) · [ADRs](docs/adr/) · [Benchmark report](evals/rca/REPORT.md)
 
 <img src="docs/media/closed-loop.gif" alt="A bad deploy breaks checkout; Prometheus fires; Sentinel opens the incident by itself, investigates with tools, cites evidence; a human approves; the fix runs once and recovery is verified: mitigated in 14 s" width="900">
 
@@ -219,3 +220,6 @@ Eight phases, each with its goal, decisions, **bugs found and fixed**, and measu
 
 ## Roadmap
 Claude benchmark column (needs an API key) · KMS-backed signing and mTLS · async approval with streamed progress · dependency-aware alert correlation · incidents recorded from real postmortems. Details: [limitations and roadmap](docs/handbook/16-limitations-and-roadmap.md).
+
+## Contributing and license
+Contributions are welcome: see [CONTRIBUTING](CONTRIBUTING.md) (how to run, verify and keep the docs in sync), the [code of conduct](CODE_OF_CONDUCT.md) and the [security policy](SECURITY.md). Licensed under the [Apache License 2.0](LICENSE).
