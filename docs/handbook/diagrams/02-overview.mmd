@@ -1,0 +1,32 @@
+flowchart LR
+  subgraph detect["1 · Detect"]
+    PR[Prometheus rules] --> AM[Alertmanager]
+  end
+  subgraph platform["Sentinel"]
+    GW["<b>Gateway</b><br/>Spring Boot 4 · Spring AI<br/>OIDC · tenancy · rate limits<br/>hybrid RAG · sole token issuer"]
+    AG["<b>Agent</b><br/>LangGraph · durable state<br/>budgets · guardrails"]
+    ING["<b>Ingestion</b><br/>Kafka → chunk → embed"]
+  end
+  subgraph tools["MCP tools"]
+    OBS[observability<br/>deploys · logs · metrics · probes]
+    REM[remediation<br/>capability-gated ops]
+  end
+  subgraph data["Data"]
+    PG[("Postgres + pgvector<br/>row-level security")]
+    KF[(Kafka)]
+    RD[(Redis)]
+  end
+  AM -->|"2 · webhook (revocable token)"| GW
+  GW -->|"3 · investigate"| AG
+  AG -->|tool token| OBS
+  U([On-call engineer]) -->|"4 · review + approve"| GW
+  GW -->|"5 · single-use capability"| AG
+  AG -->|"execute once"| REM
+  AG -->|"6 · verify recovery"| OBS
+  OBS & REM --> SVC[(Production<br/>services)]
+  GW --> PG & RD
+  GW --> KF --> ING --> PG
+  AG --> PG
+  LLM[(Claude or local gemma4)] -.- AG
+  classDef hl fill:#eef3ff,stroke:#2f5bd3,color:#111
+  class GW,AG,ING hl

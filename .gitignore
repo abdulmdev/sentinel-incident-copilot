@@ -27,3 +27,4 @@ web/next-env.d.ts
 *.tfstate.*
 *.tfplan
 crash.log
+frames/

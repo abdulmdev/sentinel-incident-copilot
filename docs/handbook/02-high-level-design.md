@@ -32,11 +32,17 @@
 | N11 Zero-trust identity | No network position or shared secret grants access; only the gateway can mint service credentials | ES256 service tokens + JWKS; OIDC users; per-call agent tokens; MCP tool tokens; revocable integration tokens; checkpoint RLS (ADR-0009) |
 | N10 Verified outcomes | "Resolved" means healthy, not "approved" | Post-execution probes; `REMEDIATION_FAILED` keeps the incident open |
 
+## 1A. Architecture at a glance
+
+![Architecture at a glance: detect, investigate, approve, execute once, verify](images/02-overview.png)
+
+*Figure 2.1: Architecture at a glance: detect, investigate, approve, execute once, verify*
+
 ## 2. System context
 
 ![System context: who uses Sentinel and what it talks to](images/02-context.png)
 
-*Figure 2.1: System context: who uses Sentinel and what it talks to*
+*Figure 2.2: System context: who uses Sentinel and what it talks to*
 
 Sentinel reads production telemetry, is woken by the alerting system, proposes actions, and, **after a human approves**, executes that one action through the team's deploy tooling and checks that it worked. The agent never holds standing deploy credentials: each approval mints a single-use capability for exactly the approved operation (ADR-0008).
 
@@ -44,7 +50,7 @@ Sentinel reads production telemetry, is woken by the alerting system, proposes a
 
 ![Container view: every service, data store and connection](images/02-containers.png)
 
-*Figure 2.2: Container view: every service, data store and connection*
+*Figure 2.3: Container view: every service, data store and connection*
 
 | Container | Responsibility | Owns | Talks to |
 |---|---|---|---|
@@ -64,7 +70,7 @@ Sentinel reads production telemetry, is woken by the alerting system, proposes a
 
 ![Opening an incident: record first, scoped token, bounded tool loop, guardrails, approval pause](images/02-seq-open-incident.png)
 
-*Figure 2.3: Opening an incident: record first, scoped token, bounded tool loop, guardrails, approval pause*
+*Figure 2.4: Opening an incident: record first, scoped token, bounded tool loop, guardrails, approval pause*
 
 If the agent call fails, the gateway marks the record `FAILED` and returns the error (503/502), so an incident never silently disappears.
 
@@ -72,31 +78,31 @@ If the agent call fails, the gateway marks the record `FAILED` and returns the e
 
 ![Approval: a single-use capability for exactly the approved action, execution through the adapter, verification with real traffic](images/02-seq-approval.png)
 
-*Figure 2.4: Approval: a single-use capability for exactly the approved action, execution through the adapter, verification with real traffic*
+*Figure 2.5: Approval: a single-use capability for exactly the approved action, execution through the adapter, verification with real traffic*
 
 Resumption can happen on any agent replica, hours later: the thread `tenant:incident` is loaded from Postgres. The capability is passed in run config, not state, so it is never written to a checkpoint. If the adapter refuses (expired, replayed, wrong action) or verification fails, the status is `REMEDIATION_FAILED` and the incident stays open for a human.
 
 ![Incident lifecycle with the closed loop](images/09-incident-status.png)
 
-*Figure 2.5: Incident lifecycle with the closed loop*
+*Figure 2.6: Incident lifecycle with the closed loop*
 
 ### 4.3 Knowledge ingestion
 
 ![Knowledge ingestion: acknowledged writes, idempotent indexing, atomic replace, dead-letter topic](images/02-seq-ingestion.png)
 
-*Figure 2.6: Knowledge ingestion: acknowledged writes, idempotent indexing, atomic replace, dead-letter topic*
+*Figure 2.7: Knowledge ingestion: acknowledged writes, idempotent indexing, atomic replace, dead-letter topic*
 
 ### 4.4 Ask (RAG with semantic cache)
 
 ![Ask: semantic cache first, otherwise grounded retrieval and the LLM](images/02-seq-ask.png)
 
-*Figure 2.7: Ask: semantic cache first, otherwise grounded retrieval and the LLM*
+*Figure 2.8: Ask: semantic cache first, otherwise grounded retrieval and the LLM*
 
 ### 4.5 Alert intake (incidents that open themselves)
 
 ![Alert intake: integration token, per-service lock, dedupe or correlate or open, investigate after responding](images/02-seq-alert-intake.png)
 
-*Figure 2.8: Alert intake: integration token, per-service lock, dedupe or correlate or open, investigate after responding*
+*Figure 2.9: Alert intake: integration token, per-service lock, dedupe or correlate or open, investigate after responding*
 
 - **One incident per fault.** Alertmanager re-sends firing alerts every group interval, and one fault often trips several rules: pool exhaustion fires both `DbPoolSaturated` and `HighErrorRatio`. Under a transaction-scoped advisory lock per (tenant, service):
   - same fingerprint with an active incident → *deduplicated*;
@@ -116,11 +122,11 @@ Resumption can happen on any agent replica, hours later: the thread `tenant:inci
 
 ![Fast local loop: infrastructure in Docker, services as host processes, optional local LLM](images/02-deploy-local.png)
 
-*Figure 2.9: Fast local loop: infrastructure in Docker, services as host processes, optional local LLM*
+*Figure 2.10: Fast local loop: infrastructure in Docker, services as host processes, optional local LLM*
 
 ![AWS deployment: private EKS across three AZs with managed, encrypted data stores](images/02-deploy-aws.png)
 
-*Figure 2.10: AWS deployment: private EKS across three AZs with managed, encrypted data stores*
+*Figure 2.11: AWS deployment: private EKS across three AZs with managed, encrypted data stores*
 
 ## 6. Cross-cutting design
 
@@ -128,7 +134,7 @@ Resumption can happen on any agent replica, hours later: the thread `tenant:inci
 
 ![Who issues which token, and who can only verify it](images/10-identity.png)
 
-*Figure 2.11: Who issues which token, and who can only verify it*
+*Figure 2.12: Who issues which token, and who can only verify it*
 
 - **Users** sign in at the company IdP (Keycloak in dev) through the console's OIDC code flow with PKCE. The `tenant_id` claim (an attribute only IdP admins can change) is the only source of tenant identity; roles (`tenant-admin`) come from the IdP too. HS256 dev tokens exist only where the dev issuer is enabled (scripts, CI, kind).
 - **Services** use tokens minted **only by the gateway**: ES256 with a key ring, verified everywhere else against the public JWKS. Verifiers hold no key that can mint.
@@ -152,7 +158,7 @@ Resumption can happen on any agent replica, hours later: the thread `tenant:inci
 
 ![Safety layers: deterministic checks before and after the model; a violation becomes a recorded escalation](images/02-safety-layers.png)
 
-*Figure 2.12: Safety layers: deterministic checks before and after the model; a violation becomes a recorded escalation*
+*Figure 2.13: Safety layers: deterministic checks before and after the model; a violation becomes a recorded escalation*
 
 Defense in depth, in order:
 1. **Closed action set:** the model can't invent an action.
@@ -172,7 +178,7 @@ Every intervention is recorded and measured (ADR-0006, chapter 11).
 
 ![What happens when each dependency fails](images/02-degradation.png)
 
-*Figure 2.13: What happens when each dependency fails*
+*Figure 2.14: What happens when each dependency fails*
 
 | Dependency down | Behavior |
 |---|---|
