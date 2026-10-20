@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinel: agentic incident response</title>
+<meta name="description" content="An agentic incident-response copilot: alerts open incidents, a LangGraph agent investigates with MCP tools, a human approves, a single-use capability executes the fix, and recovery is verified.">
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --ink: #18181b; --muted: #5b5b66; --line: #e6e5e0;
+    --accent: #2f5bd3; --accent-ink: #ffffff; --ok: #1f7a4d; --chip: #efeee9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111113; --panel: #18181b; --ink: #ededee; --muted: #a1a1aa; --line: #2a2a2f;
+            --accent: #7d9bff; --accent-ink: #0b0b0d; --ok: #4cc38a; --chip: #232327; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.6 ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+  header { padding: 56px 0 24px; text-align: center; }
+  .eyebrow { display: inline-block; font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
+             color: var(--muted); background: var(--chip); padding: 4px 10px; border-radius: 999px; }
+  h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.1; margin: 18px 0 12px; letter-spacing: -.02em; }
+  .lede { font-size: clamp(17px, 2.2vw, 20px); color: var(--muted); max-width: 760px; margin: 0 auto 26px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .btn { display: inline-block; padding: 11px 18px; border-radius: 10px; font-weight: 600; border: 1px solid var(--line);
+         background: var(--panel); color: var(--ink); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn:hover { text-decoration: none; filter: brightness(1.05); }
+  figure { margin: 36px 0 8px; }
+  .demo { width: 100%; border-radius: 14px; border: 1px solid var(--line); box-shadow: 0 10px 40px rgba(0,0,0,.12); display: block; }
+  figcaption { text-align: center; color: var(--muted); font-size: 14px; margin-top: 10px; }
+  section { padding: 40px 0 8px; }
+  h2 { font-size: 26px; margin: 0 0 16px; letter-spacing: -.01em; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .stat b { display: block; font-size: 28px; line-height: 1.2; }
+  .stat span { color: var(--muted); font-size: 14px; }
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid;
+           grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+  .steps li { counter-increment: s; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 14px 54px; position: relative; }
+  .steps li::before { content: counter(s); position: absolute; left: 14px; top: 13px; width: 28px; height: 28px; border-radius: 50%;
+                      background: var(--accent); color: var(--accent-ink); font-weight: 700; display: grid; place-items: center; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .card h3 { margin: 0 0 8px; font-size: 17px; }
+  .card ul { margin: 0; padding-left: 18px; color: var(--muted); }
+  .card li { margin: 4px 0; }
+  .card li b { color: var(--ink); font-weight: 600; }
+  .arch { width: 100%; background: #fff; border-radius: 12px; border: 1px solid var(--line); padding: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 5px 12px; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  footer { padding: 40px 0 56px; color: var(--muted); text-align: center; font-size: 14px; }
+  @media (max-width: 560px) { header { padding-top: 36px; } th, td { padding: 8px 10px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="eyebrow">AI engineering · distributed systems · security</span>
+    <h1>Sentinel</h1>
+    <p class="lede">An agentic incident-response copilot that closes the loop: the alert opens the incident, an agent investigates and cites its evidence, a human approves, the fix runs exactly once, and recovery is verified.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/abdulmdev/sentinel-incident-copilot">View on GitHub</a>
+      <a class="btn" href="handbook/Sentinel-Handbook.html">Engineering handbook</a>
+      <a class="btn" href="Sentinel-Handbook.pdf">Handbook PDF</a>
+      <a class="btn" href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/USER-GUIDE.md">User guide</a>
+    </div>
+    <figure>
+      <img class="demo" src="media/closed-loop.gif" alt="Recorded demo: a bad deploy breaks checkout, the alert opens an incident, the agent proposes a cited rollback, a human approves, and recovery is verified in 14 seconds" loading="eager">
+      <figcaption>Recorded from the running system: bad deploy → alert → cited rollback proposal → approve → <b>mitigated in 14 s</b></figcaption>
+    </figure>
+  </header>
+
+  <section>
+    <h2>Measured, not claimed</h2>
+    <div class="stats">
+      <div class="stat"><b>14–41 s</b><span>time to mitigate, alert → verified healthy (6 live runs, human approval included)</span></div>
+      <div class="stat"><b>0</b><span>harmful actions, successful injections and PII leaks on the 112-incident benchmark (rule baseline)</span></div>
+      <div class="stat"><b>16% → 0%</b><span>harmful rollbacks: the bug the eval caught, now a CI gate</span></div>
+      <div class="stat"><b>208</b><span>automated tests; CI incl. a real Kubernetes end-to-end run, green on first push</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What happens when production breaks</h2>
+    <ol class="steps">
+      <li><b>Detect.</b> Prometheus fires; the incident opens itself, deduplicated and correlated per service.</li>
+      <li><b>Investigate.</b> A LangGraph agent calls MCP tools (deploys, logs, metrics, runbooks) within hard budgets.</li>
+      <li><b>Diagnose.</b> Ranked root causes, each cited to evidence; deterministic guardrails block unsafe actions.</li>
+      <li><b>Approve.</b> Nothing touches production until a human says yes.</li>
+      <li><b>Execute once.</b> Approval mints a 5-minute, single-use capability for exactly that action.</li>
+      <li><b>Verify.</b> Real-traffic probes decide “resolved”; time to mitigate and the postmortem are recorded.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Engineering highlights</h2>
+    <div class="grid">
+      <div class="card"><h3>Agentic AI, done safely</h3><ul>
+        <li><b>LangGraph</b> with a human-approval interrupt and <b>durable Postgres checkpoints</b></li>
+        <li>Tools over <b>MCP</b>; step and dollar budgets enforced by the graph</li>
+        <li>PII redaction, injection removal, citation validation, policy interlocks, constrained decoding</li>
+        <li>Claude, local <b>gemma4</b> via Ollama, or rules</li></ul></div>
+      <div class="card"><h3>Zero-trust security</h3><ul>
+        <li>Only the gateway mints credentials: <b>ES256 + JWKS</b>; verifiers can't forge</li>
+        <li><b>Single-use capabilities</b>; replay store <b>fails closed</b></li>
+        <li><b>OIDC</b> (Keycloak, PKCE); every hop authenticated and tenant-bound</li>
+        <li><b>Row-level security</b> incl. agent checkpoints; least-privilege secrets checked in CI</li></ul></div>
+      <div class="card"><h3>Distributed systems</h3><ul>
+        <li><b>Kafka</b> ingestion, idempotent re-index, dead-letter topic</li>
+        <li><b>Hybrid retrieval</b> (pgvector + full-text, RRF) in one Postgres transaction</li>
+        <li>Race-safe alert dedup with a per-service <b>advisory lock</b></li>
+        <li>Atomic <b>Lua token bucket</b> on Redis with local fallback</li></ul></div>
+      <div class="card"><h3>Rigor and operations</h3><ul>
+        <li><b>Deterministic benchmark</b> (112 incidents + held-out) as a <b>CI gate</b></li>
+        <li><b>OpenTelemetry</b> trace per incident across Java → Python → MCP; Grafana</li>
+        <li><b>Helm</b> (hardened pods, NetworkPolicies), kind e2e, <b>Terraform</b> for AWS</li>
+        <li>9 ADRs; a 16-chapter handbook incl. every bug found</li></ul></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Architecture</h2>
+    <img class="arch" src="handbook/images/02-overview.png" alt="Architecture overview: Prometheus and Alertmanager, the gateway, the LangGraph agent, MCP observability and remediation servers, Postgres, Kafka, Redis">
+  </section>
+
+  <section>
+    <h2>Built with</h2>
+    <div class="chips">
+      <span class="chip">Java 21</span><span class="chip">Spring Boot 4</span><span class="chip">Spring AI 2</span>
+      <span class="chip">Python 3.12</span><span class="chip">LangGraph</span><span class="chip">LangChain</span>
+      <span class="chip">MCP</span><span class="chip">FastAPI</span><span class="chip">Next.js 16</span>
+      <span class="chip">PostgreSQL + pgvector</span><span class="chip">Kafka</span><span class="chip">Redis</span>
+      <span class="chip">Keycloak (OIDC)</span><span class="chip">OpenTelemetry</span><span class="chip">Prometheus</span>
+      <span class="chip">Grafana</span><span class="chip">Kubernetes + Helm</span><span class="chip">Terraform (AWS)</span>
+      <span class="chip">GitHub Actions</span><span class="chip">Claude · gemma4</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it was built</h2>
+    <table>
+      <tr><th>Phase</th><th>Outcome</th></tr>
+      <tr><td>1 · Foundation</td><td>Gateway ↔ LangGraph agent ↔ chaos-lab; human approval; tenancy from the JWT</td></tr>
+      <tr><td>2 · Ingestion + RAG</td><td>Kafka ingestion; hybrid retrieval; row-level security by a non-superuser role</td></tr>
+      <tr><td>3 · Agents</td><td>MCP tool servers, downscoped tokens, budgets, durable checkpoints</td></tr>
+      <tr><td>4 · Evaluation</td><td>Replayed-incident benchmark as a CI gate; found the 16% harmful-rollback bug</td></tr>
+      <tr><td>5 · Hardening</td><td>Guardrails + injection tier, Redis limits, semantic cache, tracing, load tests</td></tr>
+      <tr><td>6 · Ship</td><td>Console, Helm on Kubernetes, Terraform for AWS, CI</td></tr>
+      <tr><td>7 · Close the loop</td><td>Alerts open incidents; capability-gated execution; verification; time to mitigate</td></tr>
+      <tr><td>8 · Zero trust</td><td>ES256 + JWKS, OIDC, every hop authenticated, checkpoint RLS</td></tr>
+    </table>
+  </section>
+
+  <footer>
+    Sentinel · <a href="https://github.com/abdulmdev/sentinel-incident-copilot">source</a> ·
+    <a href="handbook/Sentinel-Handbook.html">handbook</a> ·
+    <a href="https://github.com/abdulmdev/sentinel-incident-copilot/tree/main/docs/adr">decision records</a>
+  </footer>
+</div>
+</body>
+</html>
