@@ -15,7 +15,7 @@
 ![Terraform](https://img.shields.io/badge/Terraform-AWS-844FBA?logo=terraform&logoColor=white)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-[Website](https://abdulmdev.github.io/sentinel-incident-copilot/) · [User guide](docs/USER-GUIDE.md) · [Engineering handbook](docs/handbook/README.md) ([PDF](docs/Sentinel-Handbook.pdf)) · [System design](docs/DESIGN.md) · [ADRs](docs/adr/) · [Benchmark report](evals/rca/REPORT.md)
+[Website](https://abdulmdev.github.io/sentinel-incident-copilot/) · [Write-up: what a local 8B model taught us about letting AI touch production](https://abdulmdev.github.io/sentinel-incident-copilot/blog/ai-agent-production-guardrails.html) · [User guide](docs/USER-GUIDE.md) · [Engineering handbook](docs/handbook/README.md) ([PDF](docs/Sentinel-Handbook.pdf)) · [System design](docs/DESIGN.md) · [ADRs](docs/adr/) · [Benchmark report](evals/rca/REPORT.md)
 
 <img src="docs/media/closed-loop.gif" alt="A bad deploy breaks checkout; Prometheus fires; Sentinel opens the incident by itself, investigates with tools, cites evidence; a human approves; the fix runs once and recovery is verified: mitigated in 14 s" width="900">
 

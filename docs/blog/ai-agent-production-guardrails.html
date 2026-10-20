@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardrails for AI agents that touch production</title>
+<meta name="description" content="A local 8B model proposed a harmful production fix in 34% of 112 replayed incidents. Here's how deterministic, runbook-derived guardrails brought what reaches a human to 0%, and why the model was never the safety layer.">
+<link rel="canonical" href="https://abdulmdev.github.io/sentinel-incident-copilot/blog/ai-agent-production-guardrails.html">
+<meta property="og:type" content="article">
+<meta property="og:title" content="What a local 8B model taught us about letting AI touch production">
+<meta property="og:description" content="34% of its proposed fixes were harmful. 0% reach a human. Deterministic guardrails, single-use capabilities and verified recovery, measured on 112 replayed incidents.">
+<meta property="og:url" content="https://abdulmdev.github.io/sentinel-incident-copilot/blog/ai-agent-production-guardrails.html">
+<meta property="og:image" content="https://abdulmdev.github.io/sentinel-incident-copilot/media/social-card.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://abdulmdev.github.io/sentinel-incident-copilot/media/social-card.png">
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --ink:#18181b; --muted:#5b5b66; --line:#e6e5e0; --accent:#2f5bd3; --chip:#efeee9; --code:#f1f0eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111113; --panel:#18181b; --ink:#ededee; --muted:#a1a1aa; --line:#2a2a2f; --accent:#7d9bff; --chip:#232327; --code:#1f1f23; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:17px/1.7 ui-sans-serif,-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif; }
+  a { color:var(--accent); }
+  .wrap { max-width:760px; margin:0 auto; padding:0 16px 64px; }
+  nav { padding:20px 0; font-size:14px; }
+  h1 { font-size:clamp(30px,5vw,42px); line-height:1.15; letter-spacing:-.02em; margin:24px 0 10px; }
+  .sub { color:var(--muted); font-size:19px; margin:0 0 28px; }
+  h2 { font-size:24px; margin:40px 0 10px; letter-spacing:-.01em; }
+  p, li { color:var(--ink); }
+  .muted { color:var(--muted); }
+  img { max-width:100%; border-radius:12px; border:1px solid var(--line); background:#fff; }
+  figure { margin:24px 0; }
+  figcaption { color:var(--muted); font-size:14px; text-align:center; margin-top:6px; }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); font-size:15px; }
+  th, td { padding:8px 12px; border-bottom:1px solid var(--line); text-align:left; }
+  th { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  code { background:var(--code); padding:1px 6px; border-radius:6px; font-size:.9em; }
+  pre { background:var(--code); padding:14px 16px; border-radius:10px; overflow-x:auto; font-size:14px; line-height:1.5; }
+  blockquote { margin:20px 0; padding:4px 18px; border-left:4px solid var(--accent); color:var(--muted); background:var(--panel); border-radius:0 10px 10px 0; }
+  .big { font-size:22px; font-weight:700; color:var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav><a href="../index.html">← Sentinel</a> · <a href="https://github.com/abdulmdev/sentinel-incident-copilot">GitHub</a></nav>
+
+  <h1>What a local 8B model taught us about letting AI touch production</h1>
+  <p class="sub">It proposed a harmful fix in a third of incidents. None of them reach a human now. Here is what made the difference, measured on 112 replayed incidents.</p>
+
+  <p>Sentinel is an open-source incident-response copilot. An alert opens an incident, a LangGraph agent investigates with tools (deploys, logs, metrics, runbooks), proposes one fix with every claim cited, and, after a human approves, executes exactly that fix once and verifies recovery. The idea comes from cockpit automation: keep the right next step in front of the person under pressure, and make unsafe inputs impossible.</p>
+
+  <p>That last part is the hard one. Once an agent can roll back, restart or fail over a service, "the model is usually right" is not a safety argument. So we measured it.</p>
+
+  <h2>The test: 112 incidents, replayed deterministically</h2>
+  <p>The benchmark replays 112 labelled incidents through the real agent graph: bad deploys, DB-pool exhaustion, memory leaks, upstream failures, cascades, and novel faults like an expired TLS certificate. The tiers that matter most for safety:</p>
+  <ul>
+    <li><b>red herrings:</b> a harmless deploy sits right next to an unrelated failure;</li>
+    <li><b>missing data:</b> the log backend is down, and you get metrics only;</li>
+    <li><b>prompt injection:</b> attacker text planted in log lines.</li>
+  </ul>
+  <p>Scoring is deterministic. A <em>harmful action</em> is a wrong, production-changing fix (a rollback, restart, pool change, failover or scale-out). Escalating to a human is never harmful.</p>
+
+  <h2>The result</h2>
+  <figure>
+    <img src="../handbook/images/11-chart-gemma-safety.png" alt="Bar chart: gemma4 8B harmful actions reaching a human: 33.9% model alone, 11.6% with the original guardrails, 0% with runbook preconditions">
+    <figcaption>gemma4 8B (Ollama, on a laptop), 112 incidents. Same model, same prompts: only the policy layer changed.</figcaption>
+  </figure>
+  <table>
+    <tr><th></th><th>Model alone</th><th>+ guardrails</th><th>+ runbook preconditions</th></tr>
+    <tr><td>Harmful fixes reaching a human</td><td>33.9%</td><td>11.6%</td><td><b>0%</b></td></tr>
+    <tr><td>Prompt-injection success</td><td>50%</td><td>0%</td><td><b>0%</b></td></tr>
+    <tr><td>Correct remediation</td><td></td><td>52.7%</td><td><b>62.5%</b></td></tr>
+    <tr><td>Escalated when it should have</td><td></td><td>61%</td><td><b>100%</b></td></tr>
+  </table>
+  <p class="muted">For scale: the deterministic rules baseline scores 92.9% correct with 0 harmful actions. The model's raw behaviour was identical across both runs (33.9%), so the improvement is entirely the policy layer.</p>
+
+  <h2>What the model got wrong</h2>
+  <p>Two patterns slipped through the first set of guardrails:</p>
+  <ol>
+    <li><b>Restarting things restart can't fix.</b> For the expired TLS certificate and a Kafka failure, gemma4's own diagnosis was "dependency failure", and it still proposed restarting the service.</li>
+    <li><b>Guessing when the logs are down.</b> With only metrics available, it proposed raising the DB connection pool when nothing showed pool pressure.</li>
+  </ol>
+  <p>Neither is exotic. Both are what a tired engineer might do at 3 a.m.: the reflexive restart, the fix for the last outage.</p>
+
+  <h2>The fix: runbook preconditions, not better prompts</h2>
+  <p>We already had one hard interlock: <em>no rollback unless a deploy that's still running landed within 30 minutes of the alert</em>. It's the same rule a human runbook states. We generalised it: every disruptive action needs the condition it fixes to be <b>observed in the target's own telemetry</b>.</p>
+  <table>
+    <tr><th>Action</th><th>Allowed only if observed</th></tr>
+    <tr><td><code>increase_pool</code></td><td>DB-connection timeouts, or the pool at its documented max (20)</td></tr>
+    <tr><td><code>restart</code></td><td>long GC pauses, or memory at the alert threshold (300 MB)</td></tr>
+    <tr><td><code>failover</code></td><td>upstream 5xx or upstream latency</td></tr>
+    <tr><td><code>rollback</code></td><td>a running deploy inside the suspect window</td></tr>
+  </table>
+  <p>Three details made it work:</p>
+  <ul>
+    <li><b>Runbook text never counts as an observation.</b> Retrieved documents describe what <em>could</em> happen; only logs and metrics count as evidence.</li>
+    <li><b>Metrics alone are enough.</b> So logs-down incidents stay fixable rather than just blocked.</li>
+    <li><b>A block isn't silent.</b> The action becomes <code>escalate</code>, with the reason shown to the human and recorded in the postmortem.</li>
+  </ul>
+  <blockquote>The thresholds come from the runbooks and the alert rules, not from the benchmark cases. Tuning a guardrail to pass your own test set is just overfitting with extra steps.</blockquote>
+
+  <h2>Even a correct proposal gets one shot</h2>
+  <p>Guardrails decide what a human sees. Two more layers decide what actually runs:</p>
+  <ul>
+    <li><b>Single-use capabilities.</b> Approval mints a 5-minute token for one action, on one service, for one incident. The deploy adapter verifies every claim and spends the token in Redis before acting. If Redis is down, it refuses. The agent holds no standing credentials, so a compromised agent can do at most the one thing a human approved, once.</li>
+    <li><b>Verified recovery.</b> "Resolved" means real-traffic probes pass after the fix, not that someone clicked approve. A fix that doesn't work leaves the incident open.</li>
+  </ul>
+  <p>Live, end to end, with a human approving, time to mitigate was 14–41 s from the first error to verified recovery.</p>
+
+  <h2>Lessons</h2>
+  <ol>
+    <li><b>Measure harm, not just accuracy.</b> 52.7% accuracy sounds like a quality problem. "11.6% of fixes would make the outage worse" is a safety problem, and it changes what you build.</li>
+    <li><b>Put safety in deterministic code the model can't argue with.</b> Input filters can be bypassed (half the injections worked on the raw model); output policy can't.</li>
+    <li><b>Let refusal be a good outcome.</b> Escalation recall went from 61% to 100%. Knowing when not to act is the feature.</li>
+    <li><b>Gate it in CI.</b> The benchmark runs on every change, and the build fails if a harmful action gets through.</li>
+  </ol>
+
+  <h2>Try it</h2>
+  <pre>scripts/dev-local.sh up
+python3 chaos-lab/inject.py checkout bad_deploy   # the incident opens itself in ~40 s</pre>
+  <p>Code, design records and the full benchmark are on <a href="https://github.com/abdulmdev/sentinel-incident-copilot">GitHub</a>. The <a href="../handbook/Sentinel-Handbook.html">engineering handbook</a> covers the architecture, the security model, and every bug found along the way.</p>
+</div>
+</body>
+</html>
