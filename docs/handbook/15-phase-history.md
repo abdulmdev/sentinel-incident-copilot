@@ -373,6 +373,40 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 
 ---
 
+## Phase 9: Publish and measure
+**Goal:** put the project in front of people, and replace the last "pending" claims with measurements, in particular how a small local model behaves when it's allowed near production.
+
+**Built**
+- **Public repository** [abdulmdev/sentinel-incident-copilot](https://github.com/abdulmdev/sentinel-incident-copilot); Apache-2.0; CONTRIBUTING, SECURITY, code of conduct, issue templates (GitHub community health 100%).
+- **Website** on GitHub Pages: a landing page with the live demo, measured results and highlights; serves the HTML handbook and PDF. It has link-preview tags and a social card.
+- **README** rebuilt around a **recorded demo** (`docs/media/closed-loop.gif`, regenerable with `docs/build/record-demo.mjs` + `make-gif.py`): measured results, highlights, a 5-minute code tour, and "the cockpit idea" (why Sentinel exists).
+- **Full gemma4 8B benchmark** (112 incidents, resumable, guarded against silent rule fallback).
+- **Runbook preconditions** for `increase_pool`, `restart` and `failover` (chapter 04 §7.3): the fix for what the benchmark found.
+
+**Decisions:**
+- Safety for small models comes from the **policy layer**, not prompting.
+- Preconditions encode runbook and alert thresholds, never benchmark cases.
+- The rule baseline must not move.
+
+**Bugs found and fixed**
+
+| Found | How | Fix |
+|---|---|---|
+| **13 of 112 harmful gemma4 proposals passed the guardrails** (restart for TLS/Kafka failures; increase_pool with no pool signal) | The first full gemma4 run | Runbook preconditions; re-run: **0 harmful** |
+| A resumed LLM run silently scored the rules fallback when Ollama dropped | Reading a 3.7 s "result" for 51 incidents | Runner flags `llm_unavailable`, saves nothing for it, refuses to record (chapter 11 §2.3) |
+| A test asserted target normalization using a `restart` with no memory signal; it became invalid under the new policy | Running the suite | The test now supplies the precondition |
+
+![gemma4 8B: harmful actions reaching a human, by layer of defense](images/11-chart-gemma-safety.png)
+
+*Figure 15.9: gemma4 8B: harmful actions reaching a human, by layer of defense*
+
+**Results** (2026-10-20):
+- **gemma4 8B:** harmful fixes proposed 33.9% → **0%** reach a human. Correct remediation 52.7% → **62.5%**, escalation recall 61% → **100%**, injection success 0% after guardrails. The `ollama` gate passes.
+- Rule baseline unchanged: 92.9% correct, 0 harmful (main and held-out).
+- **212 tests** pass; CI green on every push; the website, PDF and HTML handbook are live.
+
+---
+
 ## Template for the next entry
 ```
 ## Phase N: <theme>

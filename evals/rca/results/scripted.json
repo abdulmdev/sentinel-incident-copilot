@@ -20,7 +20,7 @@
   "escalation_recall": 1,
   "avg_tool_calls": 5,
   "total_cost_usd": 0,
-  "p50_latency_ms": 68
+  "p50_latency_ms": 69
  },
  "by_difficulty": {
   "clean": {
@@ -141,7 +141,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 71,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -223,7 +223,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 61,
+   "latency_ms": 64,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -305,7 +305,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 57,
+   "latency_ms": 69,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -387,7 +387,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 52,
+   "latency_ms": 65,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -469,7 +469,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 48,
+   "latency_ms": 60,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -551,7 +551,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 43,
+   "latency_ms": 55,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -633,7 +633,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 51,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -715,7 +715,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 65,
+   "latency_ms": 46,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -797,7 +797,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 64,
+   "latency_ms": 67,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -879,7 +879,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 59,
+   "latency_ms": 69,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -961,7 +961,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 65,
+   "latency_ms": 62,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1043,7 +1043,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 60,
+   "latency_ms": 68,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1125,7 +1125,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 56,
+   "latency_ms": 64,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1207,7 +1207,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 51,
+   "latency_ms": 59,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1289,7 +1289,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 45,
+   "latency_ms": 55,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1371,7 +1371,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 41,
+   "latency_ms": 50,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1451,7 +1451,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 65,
+   "latency_ms": 70,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1531,7 +1531,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 66,
+   "latency_ms": 70,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1611,7 +1611,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 59,
+   "latency_ms": 65,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1691,7 +1691,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 55,
+   "latency_ms": 68,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1771,7 +1771,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 65,
+   "latency_ms": 63,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1851,7 +1851,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 66,
+   "latency_ms": 59,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -1931,7 +1931,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 62,
+   "latency_ms": 54,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -2011,7 +2011,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 58,
+   "latency_ms": 70,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -2091,7 +2091,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 68,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -2331,7 +2331,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 65,
+   "latency_ms": 68,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -2411,7 +2411,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 59,
+   "latency_ms": 64,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -2491,7 +2491,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 59,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -2571,7 +2571,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 54,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -2651,7 +2651,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 65,
+   "latency_ms": 48,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -2894,7 +2894,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 70,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -2975,7 +2975,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 68,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -3056,7 +3056,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 65,
+   "latency_ms": 64,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -3218,7 +3218,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 55,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -3299,7 +3299,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 63,
+   "latency_ms": 49,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -3380,7 +3380,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 68,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -3542,7 +3542,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 70,
+   "latency_ms": 69,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -3623,7 +3623,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 68,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -3785,7 +3785,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 60,
+   "latency_ms": 70,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -3866,7 +3866,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 70,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -3947,7 +3947,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 64,
+   "latency_ms": 66,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4028,7 +4028,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 72,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4109,7 +4109,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 72,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4190,7 +4190,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 72,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4271,7 +4271,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 72,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4352,7 +4352,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 64,
+   "latency_ms": 67,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4433,7 +4433,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 70,
+   "latency_ms": 72,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4514,7 +4514,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 63,
+   "latency_ms": 72,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4595,7 +4595,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 70,
+   "latency_ms": 67,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4676,7 +4676,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 70,
+   "latency_ms": 71,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -4757,7 +4757,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 70,
+   "latency_ms": 71,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5083,7 +5083,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 72,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5165,7 +5165,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 65,
+   "latency_ms": 99,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5247,7 +5247,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 98,
+   "latency_ms": 95,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5409,7 +5409,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 100,
+   "latency_ms": 101,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5490,7 +5490,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 100,
+   "latency_ms": 101,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5571,7 +5571,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 99,
+   "latency_ms": 100,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5652,7 +5652,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 95,
+   "latency_ms": 102,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5733,7 +5733,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 99,
+   "latency_ms": 96,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5814,7 +5814,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 72,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -5895,7 +5895,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 72,
+   "latency_ms": 73,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6219,7 +6219,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 70,
+   "latency_ms": 69,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6301,7 +6301,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 66,
+   "latency_ms": 69,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6383,7 +6383,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 70,
+   "latency_ms": 64,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6465,7 +6465,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 66,
+   "latency_ms": 69,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6547,7 +6547,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 70,
+   "latency_ms": 69,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6633,7 +6633,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 74,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6719,7 +6719,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 74,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6805,7 +6805,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 70,
+   "latency_ms": 74,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6891,7 +6891,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 74,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -6977,7 +6977,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 64,
+   "latency_ms": 74,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7063,7 +7063,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 74,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7149,7 +7149,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 64,
+   "latency_ms": 69,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7235,7 +7235,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 73,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7317,7 +7317,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 72,
+   "latency_ms": 68,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7399,7 +7399,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 71,
+   "latency_ms": 67,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7481,7 +7481,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 72,
+   "latency_ms": 67,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7563,7 +7563,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 71,
+   "latency_ms": 67,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7727,7 +7727,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 72,
+   "latency_ms": 67,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7809,7 +7809,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 73,
+   "latency_ms": 63,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -7973,7 +7973,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 72,
+   "latency_ms": 74,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8055,7 +8055,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 72,
+   "latency_ms": 74,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8137,7 +8137,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 72,
+   "latency_ms": 75,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8219,7 +8219,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 72,
+   "latency_ms": 75,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8299,7 +8299,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 68,
+   "latency_ms": 75,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8379,7 +8379,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 73,
+   "latency_ms": 75,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8459,7 +8459,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 73,
+   "latency_ms": 71,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8540,7 +8540,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 69,
+   "latency_ms": 77,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8621,7 +8621,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 78,
+   "latency_ms": 71,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8702,7 +8702,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 73,
+   "latency_ms": 66,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8783,7 +8783,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 67,
+   "latency_ms": 61,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8864,7 +8864,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 61,
+   "latency_ms": 55,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -8945,7 +8945,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 56,
+   "latency_ms": 49,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -9026,7 +9026,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 49,
+   "latency_ms": 44,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -9107,7 +9107,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 43,
+   "latency_ms": 39,
    "tool_calls": [
     [
      "get_recent_deploys",
@@ -9188,7 +9188,7 @@
     "stop_reason": "done",
     "cost_usd": 0
    },
-   "latency_ms": 38,
+   "latency_ms": 32,
    "tool_calls": [
     [
      "get_recent_deploys",

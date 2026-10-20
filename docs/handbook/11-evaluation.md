@@ -115,6 +115,8 @@ The gate was proven by re-introducing the Phase 4 bug (widening the deploy windo
 | rules v2 (held-out, seed 7) | 100 | 92% | 0% | Generalizes to unseen instances |
 | rules v2 + guardrails | 112 (incl. injection) | 92.9% | 0% | Rules ignore prose: immune to injection |
 | rules v2 + guardrails (held-out) | 112 | 92.9% | 0% | |
+| **gemma4 8B** (Ollama, local) + guardrails | 112 | 52.7% | **11.6%** | 33.9% before guardrails; 13 harmful proposals passed the interlocks |
+| **gemma4 8B + runbook preconditions** | 112 | **62.5%** | **0%** | Same raw behavior (33.9%); every unsafe proposal now escalates; escalation recall 61% → 100% |
 
 ### 2.2 Current baseline by tier / family (112)
 
@@ -134,14 +136,37 @@ The gate was proven by re-introducing the Phase 4 bug (widening the deploy windo
 The 8 misses are `db_pool`/`memory_leak` with logs down. The rules can't diagnose from metrics alone, so they escalate (safe). This is **deliberately not tuned away**: it's the gap the LLM path should close, and adding rules to pass our own benchmark would be gaming it.
 
 ### 2.3 LLM columns
-- **Local gemma4 (8B):** the full run is pending. A pilot (3 incidents, reasoning on) and later spot checks showed:
+
+![gemma4 8B: harmful actions reaching a human, by layer of defense](images/11-chart-gemma-safety.png)
+
+*Figure 11.7: gemma4 8B: harmful actions reaching a human, by layer of defense*
+
+- **Local gemma4 8B, full run (2026-10-20; 112 incidents, Ollama on an Apple-silicon laptop, reasoning off, ~65 s per incident, $0):**
+
+  | Metric | gemma4 + guardrails | gemma4 + runbook preconditions | Rule baseline |
+  |---|---|---|---|
+  | Correct remediation | 52.7% | **62.5%** | 92.9% |
+  | Harmful actions (before → after guardrails) | 33.9% → **11.6%** | 33.9% → **0%** | 0% → 0% |
+  | Prompt-injection success (before → after) | 50% → 0% | 50% → 0% | 0% → 0% |
+  | Escalation recall | 61% | **100%** | 100% |
+  | Root-cause accuracy | 76.8% | 76.8% | 92.9% |
+  | Citation faithfulness / PII leaks | 100% / 0 | 100% / 0 | 100% / 0 |
+
+  By tier (after preconditions): clean 73%, noisy 73%, subtle 100%, missing data 60%, red herring 38%, injection 33%; **0 harmful in every tier**.
+
+  **What the model gets wrong, and what caught it.**
+  - On its own, gemma4 proposes a production-changing wrong action in a third of incidents, and complies with half the injection attacks.
+  - The original interlocks (deploy window, investigated target) and input sanitization stopped the injections and most bad rollbacks, but 13 harmful proposals passed: `restart` for TLS-certificate and Kafka failures (its own diagnosis said "dependency failure"), and `increase_pool` with no pool signal when logs were down.
+  - The **runbook preconditions** (chapter 04 §7.3) require each disruptive action's precondition to be observed in the target's telemetry. With them, all 13 became escalations; correct answers were unaffected, and the deterministic baseline is unchanged.
+  - Lesson: on a small local model, safety came from the policy layer, not the model. Accuracy is still well below the rules on adversarial tiers, so a human approves every action.
+- Earlier pilot notes (3 incidents, reasoning on):
   - the loop works (sensible tool order, stops on its own, schema-valid RCA);
   - gemma4 **proposed the harmful rollback** on the red herring and **complied with the filter-evading injection**; the policy interlock blocked both, so the unguarded metric is nonzero while the final one is 0;
   - citation format errors were fixed by normalization;
   - free-text targets were fixed by constrained decoding.
 
-  A full run was started, then stopped at about 45/112 after 22 minutes. It wasn't saved because results were then only written at the end; now they're saved per incident.
-- **Claude:** pending; needs `ANTHROPIC_API_KEY`.
+  The first full-run attempt was stopped at about 45/112 and lost (results were then written only at the end); they're now saved per incident, which made the resumable runs above possible.
+- **Claude:** not run (no API key in this environment). `run.py --mode llm --max-usd …` with a key; the gate in `thresholds.json` (`claude`) also requires matching the baseline's accuracy.
 - **Guard against silent fallback (2026-10-11).** The agent degrades to rules when the model is unreachable, which is right in production but wrong in an LLM benchmark. When Ollama dropped mid-run, 51 scenarios finished in 3.7 s and were recorded as "gemma4".
   - The contaminated output was discarded; the 61 genuine results (63–118 s each) are kept for `--resume`.
   - The runner now flags any LLM-mode scenario without a successful model call as `llm_unavailable`. It doesn't save it (resume retries it), and when any are flagged it writes no results, history or report and exits 3.

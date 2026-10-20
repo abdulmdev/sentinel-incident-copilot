@@ -34,7 +34,7 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 
 *Figure 16.1: Roadmap items by impact and effort*
 
-1. **Fill the LLM columns** (gemma4 full run; Claude when a key is available) and record them in chapter 11.
+1. **Claude column** (needs an API key); improve the local model's accuracy on red-herring and injection tiers (currently 33–38%: safe, but escalated).
 2. **Real-world benchmark data:** record chaos-lab incidents; import anonymized postmortems.
 3. **Identity, next:** KMS-backed signing; mTLS/SPIFFE between pods; egress NetworkPolicies.
 4. **Closed loop, next:** async approval with streamed progress; dependency-aware alert correlation; closed-loop scenarios in CI; a real deploy-system adapter with mandatory dry run.

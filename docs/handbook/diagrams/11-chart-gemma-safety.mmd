@@ -1,0 +1,13 @@
+---
+config:
+  xyChart:
+    showDataLabel: true
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#b42318"
+---
+xychart-beta
+  title "gemma4 8B: harmful actions reaching a human (%, 112 incidents)"
+  x-axis ["model alone", "+ guardrails (Phase 5-8)", "+ runbook preconditions"]
+  y-axis "harmful actions %" 0 --> 40
+  bar [33.9, 11.6, 0]

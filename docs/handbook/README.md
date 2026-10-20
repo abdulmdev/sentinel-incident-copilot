@@ -2,7 +2,7 @@
 
 The complete reference for Sentinel: what it is, how it's designed (high level and low level), why each decision was made, how it's tested, deployed and operated, and what happened in each phase of building it.
 
-> **Status:** current as of **Phase 8: Zero-trust identity (2026-10-11)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
+> **Status:** current as of **Phase 9: Publish and measure (2026-10-20)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
 
 ## How to read it
 

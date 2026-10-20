@@ -127,5 +127,6 @@ docs/                   handbook (this), DESIGN.md, DEMO.md, ADRs, load-test res
 | 6 | Ship | Next.js console, incident record, hardened images, Helm on kind, Terraform for AWS, CI |
 | 7 | Close the loop | Alertmanager → incidents (deduplicated, correlated); capability-gated execution through an MCP deploy adapter; verification; time to mitigate; least-privilege secrets |
 | 8 | Zero-trust identity | ES256 service tokens + JWKS (only the gateway mints), Keycloak OIDC login, every hop authenticated, revocable integration tokens, checkpoint RLS |
+| 9 | Publish and measure | Public repo, website, recorded demo; full gemma4 benchmark; runbook preconditions take a local 8B model from 11.6% to 0% harmful actions |
 
 Full detail, including every bug found: [15 Phase history](15-phase-history.md).

@@ -123,7 +123,7 @@
     <div class="stats">
       <div class="stat"><b>14–41 s</b><span>time to mitigate, alert → verified healthy (6 live runs, human approval included)</span></div>
       <div class="stat"><b>0</b><span>harmful actions, successful injections and PII leaks on the 112-incident benchmark (rule baseline)</span></div>
-      <div class="stat"><b>16% → 0%</b><span>harmful rollbacks: the bug the eval caught, now a CI gate</span></div>
+      <div class="stat"><b>33.9% → 0%</b><span>harmful fixes proposed by a local 8B model vs. what reaches a human after guardrails</span></div>
       <div class="stat"><b>212</b><span>automated tests; CI incl. a real Kubernetes end-to-end run, green on first push</span></div>
     </div>
   </section>
@@ -196,6 +196,7 @@
       <tr><td>6 · Ship</td><td>Console, Helm on Kubernetes, Terraform for AWS, CI</td></tr>
       <tr><td>7 · Close the loop</td><td>Alerts open incidents; capability-gated execution; verification; time to mitigate</td></tr>
       <tr><td>8 · Zero trust</td><td>ES256 + JWKS, OIDC, every hop authenticated, checkpoint RLS</td></tr>
+      <tr><td>9 · Publish and measure</td><td>Full local-LLM benchmark; runbook preconditions take gemma4 from 11.6% to 0% harmful actions</td></tr>
     </table>
   </section>
 

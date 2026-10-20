@@ -62,7 +62,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 |---|---|
 | **Time to mitigate** (alert start → verified healthy, incl. the human approval) | **14–41 s** across 6 live runs ([phase history](docs/handbook/15-phase-history.md)) |
 | **Rule baseline**, 112 replayed incidents (incl. red herrings, outages, prompt injection) | **92.9%** correct remediation, **0** harmful actions, **0** successful injections, **0** PII leaks |
-GEMMA_ROW
+| **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
 | **Quality gates** | **212** automated tests; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
@@ -176,7 +176,7 @@ CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers o
 
 ## How it was built
 
-Eight phases, each with its goal, decisions, **bugs found and fixed**, and measured results in the [phase history](docs/handbook/15-phase-history.md):
+Nine phases, each with its goal, decisions, **bugs found and fixed**, and measured results in the [phase history](docs/handbook/15-phase-history.md):
 
 | Phase | Outcome |
 |---|---|
@@ -188,6 +188,7 @@ Eight phases, each with its goal, decisions, **bugs found and fixed**, and measu
 | 6 Ship | Next.js console, Helm on Kubernetes, Terraform for AWS, CI |
 | 7 Close the loop | Alerts open incidents; capability-gated execution; verification; time to mitigate |
 | 8 Zero trust | ES256 + JWKS, Keycloak OIDC, every hop authenticated, checkpoint RLS |
+| 9 Publish and measure | Full local-LLM benchmark; runbook preconditions take gemma4 from 11.6% to **0%** harmful actions |
 
 <details>
 <summary><b>All design decisions and their reasons</b></summary>
