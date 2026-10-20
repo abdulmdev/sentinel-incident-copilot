@@ -28,3 +28,6 @@ web/next-env.d.ts
 *.tfplan
 crash.log
 frames/
+
+# private launch notes
+launch-drafts.md
