@@ -57,6 +57,11 @@
   th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   tr:last-child td { border-bottom: none; }
+  .cockpit { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 12px; padding: 22px 24px; }
+  .cockpit .hook { font-size: clamp(19px, 2.6vw, 24px); font-weight: 700; line-height: 1.35; margin: 0 0 12px; }
+  .cockpit p { color: var(--muted); margin: 0 0 12px; }
+  .cockpit table { margin-top: 6px; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 10px; }
   footer { padding: 40px 0 56px; color: var(--muted); text-align: center; font-size: 14px; }
   @media (max-width: 560px) { header { padding-top: 36px; } th, td { padding: 8px 10px; } }
 </style>
@@ -80,12 +85,32 @@
   </header>
 
   <section>
+    <h2>✈️ Why Sentinel exists: the cockpit idea</h2>
+    <div class="cockpit">
+      <p class="hook">Airliners don't rely on a pilot's nerve at 3 a.m. On-call engineers shouldn't have to either.</p>
+      <p>When something fails in a modern airliner, Airbus's ECAM and Boeing's EICAS show the alert, the affected systems and the checklist to run, and Airbus's flight-envelope protection stops inputs outside safe limits. The pilot stays in command; the automation keeps the <em>right</em> next step in front of them, so stress, fear or fatigue don't turn a manageable failure into a reactive one.</p>
+      <p>Production incidents have the same shape: paged at night, dashboards screaming, the fast reactive move is tempting (roll back whatever deployed last, restart everything). Sentinel brings the cockpit discipline to on-call:</p>
+      <table>
+        <tr><th>In the cockpit</th><th>In Sentinel</th></tr>
+        <tr><td>Failure alert with the affected systems (ECAM / EICAS)</td><td>The alert opens an incident; the agent gathers deploys, logs, metrics and runbooks</td></tr>
+        <tr><td>The right checklist for this failure</td><td>One proposed action, every claim cited to evidence</td></tr>
+        <tr><td>Envelope protection: unsafe inputs are blocked</td><td>Policy interlocks block unsafe actions even when proposed</td></tr>
+        <tr><td>The pilot decides</td><td>Nothing runs until a human approves</td></tr>
+        <tr><td>Exactly the commanded input, nothing more</td><td>A single-use capability executes exactly the approved action, once</td></tr>
+        <tr><td>Instruments confirm the recovery</td><td>Real-traffic probes verify health before "resolved"</td></tr>
+        <tr><td>The flight data recorder</td><td>Audit trail, timeline and auto-written postmortem</td></tr>
+      </table>
+      <p class="note">The goal isn't to replace the engineer. It's to make the calm, correct call the easy one, at any hour. Sentinel is not affiliated with Airbus or Boeing; the comparison describes a design philosophy.</p>
+    </div>
+  </section>
+
+  <section>
     <h2>Measured, not claimed</h2>
     <div class="stats">
       <div class="stat"><b>14–41 s</b><span>time to mitigate, alert → verified healthy (6 live runs, human approval included)</span></div>
       <div class="stat"><b>0</b><span>harmful actions, successful injections and PII leaks on the 112-incident benchmark (rule baseline)</span></div>
       <div class="stat"><b>16% → 0%</b><span>harmful rollbacks: the bug the eval caught, now a CI gate</span></div>
-      <div class="stat"><b>208</b><span>automated tests; CI incl. a real Kubernetes end-to-end run, green on first push</span></div>
+      <div class="stat"><b>212</b><span>automated tests; CI incl. a real Kubernetes end-to-end run, green on first push</span></div>
     </div>
   </section>
 

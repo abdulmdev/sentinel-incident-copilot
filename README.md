@@ -22,6 +22,28 @@
 
 </div>
 
+## ✈️ Why Sentinel exists: the cockpit idea
+
+> **Airliners don't rely on a pilot's nerve at 3 a.m. On-call engineers shouldn't have to either.**
+
+Modern airliners don't rely on a pilot's memory and nerve at 3 a.m. When something fails, Airbus's ECAM and Boeing's EICAS show the alert, the affected systems and the checklist to run. Airbus's flight-envelope protection stops inputs that would take the aircraft outside safe limits. The pilot stays in command throughout. The automation's job is to keep the *right* next step in front of them, so stress, fear or fatigue don't turn a manageable failure into a reactive one.
+
+Production incidents have the same shape. An engineer gets paged at night, under pressure, with dashboards screaming, and the tempting move is the fast, reactive one: roll back whatever deployed last, restart everything, scale it up. Sentinel brings the cockpit discipline to on-call:
+
+| In the cockpit | In Sentinel |
+|---|---|
+| Failure alert with the affected systems (ECAM / EICAS) | The alert opens an incident; the agent gathers deploys, logs, metrics and runbooks |
+| The right checklist for this failure | One proposed action, with every claim cited to evidence |
+| Envelope protection: unsafe inputs are blocked | Policy interlocks block unsafe actions even when proposed (no rollback without a recent deploy, no restart without memory growth, …) |
+| The pilot decides | Nothing runs until a human approves |
+| Exactly the commanded input, nothing more | A single-use capability executes exactly the approved action, once |
+| Instruments confirm the recovery | Real-traffic probes verify the service is healthy before "resolved" |
+| The flight data recorder | The audit trail, timeline and auto-written postmortem |
+
+The goal isn't to replace the engineer. It's to make the calm, correct call the easy one, at any hour.
+
+<sub>Sentinel is not affiliated with Airbus or Boeing; the comparison describes a design philosophy.</sub>
+
 ## What it does
 
 When production breaks, the on-call engineer's first 10–30 minutes go to gathering evidence. Sentinel does that work, keeps a human in charge, and proves the result:
@@ -42,7 +64,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 GEMMA_ROW
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **208** automated tests; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **212** automated tests; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 
