@@ -1,0 +1,74 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: sentinel
+spec:
+  version: v2.0.0-alpha.1
+  homepage: https://github.com/abdulmdev/sentinel-incident-copilot
+  shortDescription: Approve AI agent actions guarded by Sentinel Guard
+  description: |
+    Sentinel Guard stops AI agents from changing your cluster unless policy, or a human,
+    approved that exact change, and then admits it once. This plugin lists pending agent
+    actions, approves or denies them with your own Kubernetes credentials, and verifies
+    the guard's signed, hash-chained audit trail.
+  platforms:
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.1/kubectl-sentinel_linux_amd64.tar.gz
+      sha256: 51a028b89497ba67222e5563ce58c0874aa96f036fbb153077f8da5eacd504ce
+      files:
+        - from: kubectl-sentinel
+          to: .
+        - from: LICENSE
+          to: .
+      bin: kubectl-sentinel
+    - selector:
+        matchLabels:
+          os: linux
+          arch: arm64
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.1/kubectl-sentinel_linux_arm64.tar.gz
+      sha256: 1981dec2ddb89909cc783a20eeeddcd9e4877b4fc7158357e21bbddf75a1aaad
+      files:
+        - from: kubectl-sentinel
+          to: .
+        - from: LICENSE
+          to: .
+      bin: kubectl-sentinel
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.1/kubectl-sentinel_darwin_amd64.tar.gz
+      sha256: 833ffd3bd0e5fc987983920e4bf1f0c7d991e07ca34b236d170c174577739f9e
+      files:
+        - from: kubectl-sentinel
+          to: .
+        - from: LICENSE
+          to: .
+      bin: kubectl-sentinel
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: arm64
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.1/kubectl-sentinel_darwin_arm64.tar.gz
+      sha256: 209bda008246abf61418914638e523cae822e84875d0c3e5573baf7c3f576708
+      files:
+        - from: kubectl-sentinel
+          to: .
+        - from: LICENSE
+          to: .
+      bin: kubectl-sentinel
+    - selector:
+        matchLabels:
+          os: windows
+          arch: amd64
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.1/kubectl-sentinel_windows_amd64.tar.gz
+      sha256: 10ed08acc15c785a8a914a148fbb0064feb1bb9462d7b2e9b867c5af917a58bf
+      files:
+        - from: kubectl-sentinel.exe
+          to: .
+        - from: LICENSE
+          to: .
+      bin: kubectl-sentinel.exe

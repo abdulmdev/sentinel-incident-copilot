@@ -5197,7 +5197,7 @@ sentinel-deps  2         deployed  sentinel-deps-0.1.0
 <li><strong>Verify the audit trail:</strong> <code>kubectl sentinel audit verify</code> (needs read access to ActionRequests and the two ConfigMaps; exit code 2 on any problem).</li>
 <li><strong>Break-glass:</strong> <code>kubectl delete validatingwebhookconfiguration sentinel-guard</code> stops enforcement (re-apply the chart to restore). The deletion is in the Kubernetes audit log.</li>
 <li><strong>Rotate the TLS certificate or signing key:</strong> delete the Secret (<code>sentinel-guard-tls</code> / <code>sentinel-guard-signing</code>) and restart the pods. A new signing key invalidates outstanding capabilities and starts a new key id; events signed with the old key verify only while its public key is still published (key history is on the roadmap, chapter 16).</li>
-<li><strong>Release:</strong> pushing a <code>v2.*</code> tag runs <code>.github/workflows/release-guard.yml</code>: signed multi-arch image with SBOM and provenance, OCI chart, <code>install.yaml</code>, the plugin for 5 platforms, the krew manifest.</li>
+<li><strong>Release:</strong> pushing a <code>v2.*</code> tag runs <code>.github/workflows/release-guard.yml</code>: signed multi-arch image with SBOM and provenance, OCI chart, <code>install.yaml</code>, the plugin for 5 platforms, the krew manifest. Afterwards, commit the release&#39;s <code>sentinel.yaml</code> as <code>plugins/sentinel.yaml</code>: that directory makes this repository a krew index (<code>kubectl krew index add sentinel &lt;repo&gt;.git</code>). First release: <code>v2.0.0-alpha.1</code> (2026-10-23); the image and chart pull anonymously from GHCR.</li>
 </ul>
 </section>
 <section class="chapter"><h1 id="14-testing-and-ci">14 Testing and CI</h1>
