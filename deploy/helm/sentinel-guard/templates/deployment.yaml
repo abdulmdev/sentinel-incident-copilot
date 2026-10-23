@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-guard
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "guard.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels: {{- include "guard.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "guard.selector" . | nindent 8 }}
+      annotations:
+        checksum/policy: {{ include "guard.policy" . | sha256sum }}
+    spec:
+      serviceAccountName: sentinel-guard
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      # Spread replicas so one node or zone failure leaves the guard answering.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "guard.selector" . | nindent 14 }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "guard.selector" . | nindent 14 }}
+      containers:
+        - name: guard
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [--mode=kubernetes]
+          env:
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: SERVICE_ACCOUNT, value: sentinel-guard}
+            - {name: SENTINEL_GUARD_POLICY, value: /etc/sentinel-guard/policy.yaml}
+            - {name: SENTINEL_GUARD_SERVICE, value: sentinel-guard}
+            - {name: SENTINEL_GUARD_VALIDATING_WEBHOOK, value: sentinel-guard}
+            - {name: SENTINEL_GUARD_MUTATING_WEBHOOK, value: sentinel-guard}
+          ports:
+            - {name: https, containerPort: 8443}
+            - {name: metrics, containerPort: 9090}
+          readinessProbe:
+            httpGet: {path: /readyz, port: https, scheme: HTTPS}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: https, scheme: HTTPS}
+            periodSeconds: 10
+            failureThreshold: 6
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: policy, mountPath: /etc/sentinel-guard, readOnly: true}
+      volumes:
+        - name: policy
+          configMap: {name: sentinel-guard-policy}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sentinel-guard
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "guard.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {{- include "guard.selector" . | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentinel-guard
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "guard.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "guard.selector" . | nindent 4 }}
+  ports:
+    - {name: https, port: 443, targetPort: https}
+    - {name: metrics, port: 9090, targetPort: metrics}

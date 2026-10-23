@@ -1,0 +1,32 @@
+{
+  "agent_approved_inline_worst_case": {
+    "n": 100,
+    "p50_ms": 23.658,
+    "p95_ms": 31.113,
+    "p99_ms": 37.525,
+    "max_ms": 43.565
+  },
+  "agent_approved_once": {
+    "n": 100,
+    "p50_ms": 26.817,
+    "p95_ms": 35.564,
+    "p99_ms": 42.926,
+    "max_ms": 45.196
+  },
+  "agent_pending": {
+    "n": 400,
+    "p50_ms": 2.148,
+    "p95_ms": 3.152,
+    "p99_ms": 4.623,
+    "max_ms": 12.565
+  },
+  "baseline_human": {
+    "n": 400,
+    "p50_ms": 2.258,
+    "p95_ms": 3.375,
+    "p99_ms": 4.877,
+    "max_ms": 9.523
+  },
+  "measured_at": "2026-10-23T15:54:16+00:00",
+  "environment": "kind (1 node, Docker Desktop, Apple Silicon); 3 guard replicas"
+}

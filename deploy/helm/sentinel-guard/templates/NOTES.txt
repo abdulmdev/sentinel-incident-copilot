@@ -1,0 +1,16 @@
+Sentinel Guard is running in {{ .Release.Namespace }} ({{ .Values.replicas }} replicas).
+
+Agents are: groups {{ .Values.agents.groups | toJson }}, users {{ .Values.agents.users | toJson }}.
+Their changes to workloads now need policy or a human approval; everyone else is unaffected.
+
+Next:
+  1. Install the kubectl plugin:  kubectl krew index add sentinel https://github.com/abdulmdev/sentinel-incident-copilot.git
+                                  kubectl krew install sentinel/sentinel
+  2. Watch for requests:          kubectl sentinel requests
+  3. Approve one:                 kubectl sentinel approve <id>
+  4. Verify the audit trail:      kubectl sentinel audit verify
+{{- if not (or .Values.approvers.users .Values.approvers.groups) }}
+
+Tip: let people approve without cluster-admin:
+  helm upgrade ... --set approvers.groups={sre-oncall}
+{{- end }}

@@ -27,6 +27,12 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 | Deployment | Terraform validated, never applied; ESO/ALB/OTel Collector assumed | Unknown apply-time issues | Apply in a sandbox account; add the add-ons via Helm/Terraform |
 | Data | No retention or deletion policy for incidents, the cache, checkpoints | Unbounded growth; data-protection obligations | TTL jobs; tenant deletion workflow |
 | Product | Alertmanager only (no PagerDuty/Opsgenie) | Teams on other tools open incidents by hand | Further receivers on the same `AlertService` |
+| Guard | `ActionRequest` objects are never deleted (they are the audit record) | Unbounded growth of objects in `sentinel-system`; the watch cache holds them all | Retention with a signed export (the chain segment, its head and the public key), then compaction |
+| Guard | The chain head is one ConfigMap: every event is serialized through it, and `voids` grows with lost races | Throughput suits human approvals, not a high-volume event log; voids accumulate slowly | Segment the chain per period with signed checkpoints; compact voids into the export |
+| Guard | Signing key and TLS cert in Kubernetes Secrets; rotating the key drops the old public key | Events signed with an old key can't be verified after rotation | Keep a key history in the JWKS ConfigMap; optional KMS signing |
+| Guard | Only the configured operations are guarded (workload updates and deletes, deletes of common objects); `exec`, `port-forward`, CRDs from other operators and RBAC changes are not, by default | An agent with broad RBAC can still act through unguarded paths | Grow the default rules; pair with least-privilege RBAC for agent ServiceAccounts; Kyverno/Gatekeeper packs |
+| Guard | The incident copilot (v1) still mints its own capabilities | Two approval paths in one repo | Move `IncidentService.decide` and the remediation adapter onto the guard's API (the next v2 step) |
+| Guard | Approvals only via `kubectl sentinel` / the API; no Slack or console UI; single-process mode keeps state in memory | Approvers must use the terminal | Slack interactive approvals; a console page; a durable single-process store |
 
 ## 2. Roadmap (proposed order)
 
@@ -34,6 +40,7 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 
 *Figure 16.1: Roadmap items by impact and effort*
 
+0. **Sentinel Guard, next** (v2): move the incident copilot onto the guard; SDKs and an MCP proxy for agents outside Kubernetes; retention with signed export; Slack approvals; Kyverno/Gatekeeper packs; the SafeActionBench benchmark.
 1. **Claude column** (needs an API key); improve the local model's accuracy on red-herring and injection tiers (currently 33–38%: safe, but escalated).
 2. **Real-world benchmark data:** record chaos-lab incidents; import anonymized postmortems.
 3. **Identity, next:** KMS-backed signing; mTLS/SPIFFE between pods; egress NetworkPolicies.

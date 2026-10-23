@@ -1,10 +1,11 @@
 # 14 Testing and CI
 
-**212 automated tests** (measured 2026-10-20):
+**244 automated tests** (measured 2026-10-23; 212 before Phase 10):
 
 | Suite | Tests |
 |---|---|
 | gateway | 94 (68 unit/slice + 26 integration) |
+| sentinel-guard (Go) | 32 (28 test functions + 4 subtests), run with the race detector |
 | agent | 68 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
 | mcp-remediation | 14 |
 | eval scorer + runner | 14 |
@@ -18,7 +19,8 @@ Plus:
 - `promtool check rules` and `amtool check-config` for the alerting config;
 - `scripts/check_chart_secrets.py` (who may hold which secret, production and kind values);
 - k6 load thresholds;
-- a **scripted live closed-loop scenario** (section 4).
+- a **scripted live closed-loop scenario** (section 4);
+- **Sentinel Guard end to end** on a real API server: 25 checks, a load run and the guard taken down (section 4A).
 
 ## 1. Strategy
 
@@ -101,6 +103,32 @@ uv run --project agent-service python evals/rca/run.py --check
 | `test_auth.py` (8) | Gateway → agent: no token → 401; a token for the tenant → accepted; **another tenant's token → 403 in path and body**; tool-token audience, forged key, expired, and HS256 shared-secret tokens → 401; health and metrics open |
 | `test_postgres_checkpointer.py` (3) | Durability across processes (now with a capability, so it resolves); **checkpoint RLS**: a request bound to another tenant reads nothing and can't write (`InsufficientPrivilege`), an unbound request reads nothing; tables FORCE RLS even for their owner |
 
+### sentinel-guard (32; `cd guard && go test -race ./...`)
+- **Engine** (`internal/guard/engine_test.go`):
+  - an approval admits exactly once, a retry while pending reuses the request, a replay opens a new one;
+  - the approval is bound to the exact change and target;
+  - agents and the requester can't decide; a human denial stands;
+  - policy limits block and can't be approved; requests and approvals expire;
+  - `observe` and `auto` with observed / not-observed preconditions; dry runs record nothing;
+  - the API capability is single-use, and forged, tampered and `alg=none` tokens are refused; replaying a spent capability writes nothing;
+  - **50 concurrent retries are admitted once** and open one new request between them;
+  - API-server retries are re-admitted, but a new attempt, a reverted-then-repeated change, or a 6th retry is not;
+  - the audit chain detects edits and deletions; a lost race leaves a signed void, not a gap; a forged void can't hide a deletion;
+  - reconcile applies decisions written straight into the store, and expiries.
+- **Classifier** (`classify_test.go`):
+  - scale, restart, set-image and spec changes;
+  - a retried restart matches its approval;
+  - combined, metadata-only and status changes; Scale, delete and dry run;
+  - **scale to zero as the API server encodes it** (absent field);
+  - exact digest and generation.
+- **Policy:** strict parsing (unknown fields and invalid autonomy rejected); limits and agent identity.
+- **Preconditions:** against a fake Prometheus, including a target name that tries to rewrite the query, and Prometheus missing or down (`unknown`, never observed).
+- **Server** (`internal/server/server_test.go`):
+  - workloads webhook: humans pass; agents wait; dry run previews; approve, then admit and readmit; a replay after the window is denied; scale to zero is blocked; it fails closed on an unreadable object;
+  - approvals webhook: agents, other agents, edits, invalid decisions, creates and deletes are refused; the approver is stamped from the authenticated user;
+  - the action API end to end with JWKS;
+  - an ActionRequest's round trip through JSON keeps the audit valid.
+
 ### mcp-observability (12)
 Discovery over an MCP client session; log grouping; metric parsing; unknown service → tool error; invalid level; single-object wire shape; `probe_service` success rate and p95; **timeouts count as failures and requests are capped at 50**; unknown services rejected; **`/mcp` requires a gateway tool token** (none, wrong audience, missing `telemetry:read`, or a forged key → 401); health stays open.
 
@@ -131,8 +159,11 @@ Each metric's definition, including the edge cases: wrong escalation isn't harmf
 | `docs` | `scripts/check_docs.py`: every Markdown link resolves; every Flyway migration in chapter 08; every env var read by code in chapter 13; every metric in chapter 12 | Docs in sync with code |
 | `web` | `npm ci && npm run build` | Build + types |
 | `deploy-config` | `helm lint` (both charts); `helm template \| kubeconform -strict` for defaults/kind/aws; **`check_chart_secrets.py`** (`--prod`: signing keys only in the gateway, no dev secret anywhere; kind: no signing material outside the gateway/web); `terraform fmt -check`, `init -backend=false`, `validate` | Validity + least privilege |
+| `guard` | `gofmt` check, `go vet`, `go test -race ./...`, both binaries build (`deploy-config` also lints the guard chart and validates it with kubeconform; the CRD itself is validated by the real API server in `guard-e2e`) | Tests |
+| `guard-e2e` (needs guard, deploy-config) | `scripts/guard-e2e.sh` with `LOAD=1 LOAD_N=100` on a fresh kind cluster (section 4A) | End to end on a real API server |
 | `kind-e2e` (needs the above) | kind cluster; `scripts/kind-up.sh`; seed knowledge; inject a fault; open an incident → expect `AWAITING_APPROVAL`; **approve → expect `RESOLVED`** (capability → remediation adapter → verification, in-cluster); **assert the console pod can't reach the agent or the remediation adapter** | End to end + NetworkPolicy |
-| `images` (main only; needs kind-e2e, eval-gate) | Build jars + fetch the model; multi-arch (amd64/arm64) buildx; push `ghcr.io/<owner>/sentinel-<name>:<sha>`; GHA cache | — |
+| `images` (main only; needs kind-e2e, eval-gate, guard-e2e) | Build jars + fetch the model; multi-arch (amd64/arm64) buildx; push `ghcr.io/<owner>/sentinel-<name>:<sha>` for 8 images (incl. `sentinel-guard`); GHA cache | — |
+| `release-guard.yml` (on a `v2.*` tag) | Tests; signed multi-arch image with SBOM + provenance; OCI chart; `install.yaml`; plugin ×5 platforms; krew manifest; GitHub release | — |
 | `llm-eval` (manual `workflow_dispatch`) | `run.py --mode llm --max-usd 80 --check` with the `ANTHROPIC_API_KEY` secret (skips with a warning if absent) | Claude thresholds |
 
 **Status (2026-10-11):** the repository is public at [github.com/abdulmdev/sentinel-incident-copilot](https://github.com/abdulmdev/sentinel-incident-copilot).
@@ -160,6 +191,34 @@ Measured (2026-10-06, rule baseline):
 Both alert resolutions were later stamped on their incidents. While the gateway was down, Alertmanager retried and delivered once it came back.
 
 The first run of step 7 failed, which is why it's in the suite now. See the Phase 7 bugs in [chapter 15](15-phase-history.md#phase-7-close-the-loop).
+
+## 4A. Sentinel Guard end to end (`scripts/guard-e2e.sh`)
+It creates a kind cluster, builds the image and the plugin, installs the chart (3 replicas), creates an `agents/fixer` ServiceAccount with `edit` on namespace `shop`, and runs **25 checks**. Each one fails the run if it doesn't hold:
+
+1. **Setup:** installed, all replicas ready, and the guard set its own webhook CA bundle.
+2. **Who is stopped:**
+   - a human's scale goes through without the guard;
+   - the agent's scale is denied, pending, and the message names the request and the approve command;
+   - a retry reports the same request;
+   - a server-side dry run is admitted with a warning.
+3. **Who decides:**
+   - the agent can't approve, even with RBAC to patch requests;
+   - `kubectl sentinel requests` lists the request and `kubectl sentinel approve` approves it;
+   - `decidedBy` is the identity the API server authenticated.
+4. **Exactly once:**
+   - the approved scale is admitted;
+   - after a human revert, the same change needs a new approval;
+   - a different change needs its own;
+   - an approved restart is admitted although kubectl stamped a new time; a second restart is denied.
+5. **Policy:** scale to zero is blocked; pod deletion waits for approval.
+6. **The record:** cluster-admin can't delete an ActionRequest or edit what it requested; `kubectl sentinel audit verify` passes.
+7. **Load** (`LOAD=1`, `test/loadgen`): latency for the human, pending and approved paths, while asserting in every round that nothing unapproved is admitted. The audit still verifies afterwards.
+8. **Outage:**
+   - with all guard pods gone, a human's change still goes through and the agent's is refused;
+   - after scaling back up, measures how long until the guard answers;
+   - the audit chain is intact.
+
+Last run: 25/25 (chapter 17 §8 has the numbers).
 
 ## 5. Adding tests: rules
 - New DB behavior → a Testcontainers IT that connects as `sentinel_app` (not the container superuser).

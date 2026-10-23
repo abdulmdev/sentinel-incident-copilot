@@ -1,0 +1,43 @@
+# Sentinel Guard default policy.
+#
+# Who is an agent: any ServiceAccount in the "agents" namespace (add users or groups for your own
+# agents). Humans, CI and Kubernetes controllers are never stopped by the guard.
+#
+# Autonomy per action: deny | approve (a human approves each one) | auto (allowed when every
+# precondition is observed in telemetry, otherwise a human approves) | observe (allowed and
+# recorded: shadow mode for rolling the guard out).
+agents:
+  groups: ["system:serviceaccounts:agents"]
+  users: []
+
+defaults:
+  risk: medium
+  autonomy: approve
+
+# How long a request waits for a human, and how long an approval stays usable.
+pendingTTL: 1h
+approvalTTL: 10m
+
+# Agents may never change these, approved or not.
+protectedNamespaces: [kube-system, kube-public, kube-node-lease]
+
+actions:
+  restart:   { risk: medium }
+  scale:     { risk: medium, minReplicas: 1, maxReplicas: 20 }
+  set-image: { risk: high }
+  rollout:   { risk: high }
+  update:    { risk: high }
+  delete:    { risk: high }
+  create:    { risk: low, autonomy: observe }
+
+# Preconditions are PromQL queries the guard runs itself (it never trusts the agent's evidence).
+# Example: let agents restart on their own only when memory growth is actually observed.
+#
+# prometheus:
+#   url: http://prometheus-server.monitoring.svc
+# actions:
+#   restart:
+#     autonomy: auto
+#     preconditions:
+#       - name: memory growth
+#         query: 'max(container_memory_working_set_bytes{namespace="{{.Namespace}}", pod=~"{{.Name}}-.*"}) > 300e6'

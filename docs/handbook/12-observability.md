@@ -73,8 +73,11 @@ Alert-opened incidents keep one trace too: the webhook's request span continues 
 | `sentinel_ingestion_documents_total` | ingestion | counter `{outcome}` | `indexed`, `unchanged` |
 | `sentinel_ingestion_chunks_total` | ingestion | counter | Chunks written |
 | `chaos_*` | chaos-lab | various | Demo service signals |
+| `sentinel_guard_verdicts_total` | sentinel-guard | counter `{source, action, verdict}` | Decisions on agent actions: `allow`, `pending`, `block` (source `admission` or `api`) |
+| `sentinel_guard_admission_duration_seconds` | sentinel-guard | histogram `{webhook, allowed}` (1 ms … 2.5 s) | Time to answer an admission review (`workloads`, `approvals`) |
+| `sentinel_guard_audit_events_total` | sentinel-guard | counter `{type}` | Events appended to the audit chain (`requested`, `approved`, `executed`, `readmitted`, …) |
 
-Scrape targets: gateway and ingestion `/actuator/prometheus`; agent `/metrics`; chaos-lab `/metrics`. Rule evaluation every 5 s; alerts go to Alertmanager (`:9093`), which posts to the gateway (chapter 06 B.4, chapter 13).
+Scrape targets: gateway and ingestion `/actuator/prometheus`; agent `/metrics`; chaos-lab `/metrics`; sentinel-guard `:9090/metrics` (`serviceMonitor.enabled` in its chart). Rule evaluation every 5 s; alerts go to Alertmanager (`:9093`), which posts to the gateway (chapter 06 B.4, chapter 13).
 
 ![Prometheus scrape targets in the local stack, all up](images/screens/prometheus-targets.png)
 

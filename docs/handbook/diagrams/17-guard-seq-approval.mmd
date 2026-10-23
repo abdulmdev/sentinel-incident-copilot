@@ -1,0 +1,26 @@
+sequenceDiagram
+  autonumber
+  participant A as Agent (SA agents/fixer)
+  participant K as kube-apiserver
+  participant G as sentinel-guard
+  participant S as ActionRequests + chain head
+  participant H as Approver (kubectl sentinel)
+  A->>K: PATCH deployments/checkout/scale replicas=3
+  K->>G: AdmissionReview (agent identity, old/new object)
+  G->>S: find by approval key (watch cache): nothing open
+  G->>S: claim chain place #n, create ar-c8f4166c-1 (Pending)
+  G-->>K: denied: needs approval (request ar-c8f4166c-1)
+  K-->>A: 403 with the request id and the approve command
+  H->>K: patch ar-c8f4166c-1 spec.decision=approve
+  K->>G: AdmissionReview (approvals webhook)
+  G-->>K: allowed + JSON patch decidedBy=<authenticated user>
+  G->>S: lease holder: Pending → Approved, event "approved" (#n+1)
+  A->>K: the same PATCH again
+  K->>G: AdmissionReview
+  G->>S: Approved → Executed (compare-and-swap) + event "executed" (#n+2)
+  G-->>K: allowed (warning: admitted once)
+  K-->>A: 200, replicas=3
+  Note over K,G: if K's write conflicts, it re-runs admission:<br/>identical object + same generation → readmitted (event "readmitted")
+  A->>K: the same PATCH later (or after a revert)
+  K->>G: AdmissionReview
+  G-->>K: denied: new request ar-c8f4166c-2 needs approval

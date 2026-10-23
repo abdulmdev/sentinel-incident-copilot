@@ -132,3 +132,18 @@ Rules for new migrations:
 - **Kafka:** `knowledge.documents` (key `tenant:docId`, JSON value), `knowledge.documents-dlt` (failed records with Spring Kafka exception headers). Retention is Kafka's default; the topic is replayable to rebuild the index (e.g. after an embedding-model change).
 - **Redis:** `ratelimit:<bucket>` hashes `{tokens, ts}` with `PEXPIRE` ≈ a full refill + 1 s. Buckets are `<tenant>` (humans), `<tenant>:agent` (tool traffic) and `<tenant>:alerts` (Alertmanager).
 - **Redis (Phase 7):** the remediation adapter's **used-capability set**: `capability:<jti>` keys (`SET NX EX`, expiring with the capability). Losing Redis therefore stops *execution* (the adapter fails closed) but nothing else.
+
+## 6. Sentinel Guard state (Kubernetes objects, no database)
+Sentinel Guard keeps all of its state in the API server of the cluster it protects ([ADR-0010](../adr/0010-sentinel-guard.md); the v2 plan's `V8__action_log` migration was not needed):
+
+| Object (namespace `sentinel-system`) | Written by | Content |
+|---|---|---|
+| `ActionRequest` (`actionrequests.sentinel.dev/v1alpha1`, CRD in `deploy/helm/sentinel-guard/crds/`) | the guard (create, status); approvers (`spec.decision`, `spec.decisionNote` only, enforced by the guard's webhook) | `spec`: key, source, agent, action, target `{group, resource, namespace, name}`, change, fingerprint, intent, risk, autonomy, createdAt, decision, decidedBy, decisionNote, decidedAt. `status`: phase, reasons, preconditions, expiresAt, executedAt, exact, execGeneration, capabilityJti, audit (this request's chain events). Label `sentinel.dev/key` (indexed) |
+| ConfigMap `sentinel-guard-audit-head` | the guard | `seq`, `hash`, `voids` (JSON: signed voided places) |
+| ConfigMap `sentinel-guard-jwks` | the guard | `jwks.json`: the public key that verifies events and capabilities |
+| Secret `sentinel-guard-signing` | the guard, on first start | `key.pem` (EC P-256) |
+| Secret `sentinel-guard-tls` | the guard, on first start | `ca.crt`, `tls.crt`, `tls.key` |
+| Lease `sentinel-guard-housekeeping` | the guard | which replica does housekeeping |
+
+Every write uses the object's `resourceVersion` (compare-and-swap). Nobody but the guard can delete an `ActionRequest` (webhook); there is no retention yet (chapter 16).
+

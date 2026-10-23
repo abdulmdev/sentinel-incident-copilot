@@ -23,6 +23,28 @@
 
 </div>
 
+## 🛡️ New in v2 (alpha): Sentinel Guard, envelope protection for *any* AI agent
+
+Sentinel's safety core now ships on its own. **No agent changes your cluster unless policy, or a human, approved that exact change, and then only once.** It works with coding agents running `kubectl`, CI and GitOps bots, and LangGraph or MCP agents, with no code changes, because it enforces at the Kubernetes API. Humans, CI and controllers are never sent to it, so if the guard is down they are unaffected and only agents wait.
+
+```bash
+helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.1 -n sentinel-system --create-namespace
+```
+
+```
+$ kubectl -n shop scale deploy/checkout --replicas=3          # as an agent
+Error from server (Forbidden): ... Sentinel Guard: scale of shop/deployment/checkout needs human approval (request ar-c8f4166c-1).
+$ kubectl sentinel approve ar-c8f4166c-1                       # on-call engineer
+Approved ar-c8f4166c-1: scale of shop/deployment/checkout (replicas: 2 → 3), by alice.
+```
+
+- **Bound to the exact change.** Approving "scale to 3" doesn't admit "scale to 0", a second restart, or the same change after someone reverted it. This is proven on a real API server in CI, including the API server's own write retries (25 end-to-end checks).
+- **Tamper-evident.** Every request, decision and execution is a signed link in a hash chain; `kubectl sentinel audit verify` checks it yourself and also detects deleted records.
+- **Small.** One Go binary, an 11.5 MB image, no database. Its state lives in the Kubernetes API, and 3 replicas share it.
+- **Measured** (p99 through the API server, 3 replicas): a human's change 4.9 ms, an agent's pending change 4.6 ms, an approved change admitted once 42.9 ms.
+
+Also `kubectl apply -f install.yaml`, `docker run ghcr.io/abdulmdev/sentinel-guard` (single process, HTTP API for agents outside Kubernetes), and `kubectl krew install sentinel/sentinel`. **[Sentinel Guard docs →](docs/guard/README.md)**
+
 ## ✈️ Why Sentinel exists: the cockpit idea
 
 > **Airliners don't rely on a pilot's nerve at 3 a.m. On-call engineers shouldn't have to either.**
@@ -65,7 +87,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 | **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **212** automated tests; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **244** automated tests (212 + 32 for Sentinel Guard), plus 25 Guard checks on a real API server; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 
@@ -158,7 +180,15 @@ cd agent-service && uv run pytest
 uv run --project agent-service python evals/rca/run.py --check
 ```
 
-CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers on real pgvector/Redis), the benchmark gate (main + held-out), docs-sync checks, Helm/kubeconform/Terraform validation, a least-privilege secrets check, and a **real kind cluster end to end** (incident → approve → `RESOLVED`, NetworkPolicy denials), then publishes multi-arch images.
+```bash
+cd guard && go test -race ./...
+```
+
+```bash
+LOAD=1 scripts/guard-e2e.sh
+```
+
+CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers on real pgvector/Redis), the benchmark gate (main + held-out), docs-sync checks, Helm/kubeconform/Terraform validation, a least-privilege secrets check, and a **real kind cluster end to end** (incident → approve → `RESOLVED`, NetworkPolicy denials), and the **Sentinel Guard end to end** (25 checks, a load run, the guard taken down), then publishes multi-arch images.
 
 ## Where to look in the code (5-minute tour)
 
@@ -173,6 +203,8 @@ CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers o
 | Hybrid retrieval (RRF) | [`ReciprocalRankFusion.java`](gateway-service/src/main/java/dev/sentinel/gateway/knowledge/ReciprocalRankFusion.java) |
 | Distributed rate limiter (Lua) | [`RedisRateLimiter.java`](gateway-service/src/main/java/dev/sentinel/gateway/tenant/RedisRateLimiter.java) |
 | Benchmark scoring and its CI thresholds | [`evals/rca/scoring.py`](evals/rca/scoring.py) · [`thresholds.json`](evals/rca/thresholds.json) |
+| Guard: exactly once, API-server retries, the signed audit chain | [`guard/internal/guard/engine.go`](guard/internal/guard/engine.go) · [`classify.go`](guard/internal/guard/classify.go) · [`audit.go`](guard/internal/guard/audit.go) |
+| Guard: compare-and-swap state in the Kubernetes API | [`guard/internal/store/kube.go`](guard/internal/store/kube.go) · [`admission.go`](guard/internal/server/admission.go) |
 
 ## How it was built
 
@@ -189,6 +221,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 | 7 Close the loop | Alerts open incidents; capability-gated execution; verification; time to mitigate |
 | 8 Zero trust | ES256 + JWKS, Keycloak OIDC, every hop authenticated, checkpoint RLS |
 | 9 Publish and measure | Full local-LLM benchmark; runbook preconditions take gemma4 from 11.6% to **0%** harmful actions |
+| 10 Sentinel Guard (v2 alpha) | The safety core as a Kubernetes-native Go service for any agent; exactly-once proven on a real API server, including its write retries; p99 **42.9 ms** for an approved change |
 
 <details>
 <summary><b>All design decisions and their reasons</b></summary>

@@ -407,6 +407,66 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 
 ---
 
+## Phase 10: Sentinel Guard (v2.0.0-alpha.1)
+**Goal:** turn Sentinel's safety core (approval → single-use capability → execute once → audit) into something **any** agent is held to, without changing the agent, and that an ordinary developer can install with `helm install`, `kubectl apply` or `docker run`. Plan: the v2 roadmap (guard core, then SDKs, Kubernetes-native enforcement, a benchmark, compliance, distribution). This phase merges its first and third steps, since Kubernetes is where most agents act and where the adoption lever is.
+
+**Built** (chapter 17; [ADR-0010](../adr/0010-sentinel-guard.md); user guide [docs/guard](../guard/README.md))
+- **`guard/`**, a new Go service: policy engine, change classifier, request lifecycle, ES256 capabilities, a signed hash-chained audit log with signed voids, and Prometheus preconditions the guard checks itself.
+- **Kubernetes enforcement:**
+  - a validating webhook that sends only agents (`matchConditions`) and fails closed for them;
+  - a mutating webhook that protects `ActionRequest` records and stamps the approver from the authenticated identity;
+  - state in the API server (CRD, ConfigMaps, self-created Secrets);
+  - a watch cache, and a lease for housekeeping.
+- **The HTTP action API** for agents outside Kubernetes, and a single-process mode (`docker run`).
+- **`kubectl sentinel`**: `requests`, `describe`, `approve`, `deny`, `audit verify` (independent verification from the published key).
+- **Distribution:**
+  - the Helm chart `deploy/helm/sentinel-guard` (3 replicas, PDB, zone spread, least-privilege RBAC, approver and viewer roles);
+  - `.github/workflows/release-guard.yml`: a cosign-signed multi-arch image with SBOM and provenance, the OCI chart, `install.yaml`, the plugin for 5 platforms, the krew manifest (`scripts/krew_manifest.py`).
+- **Tests:**
+  - 32 Go tests;
+  - `scripts/guard-e2e.sh`: 25 checks on a real API server, a load run, and the guard taken down;
+  - new CI jobs `guard` and `guard-e2e`, plus chart validation;
+  - `check_docs.py` now also enforces the Go code's env vars and metrics.
+
+**Decisions** (ADR-0010):
+- **Go** for the guard: one 37.5 MB static binary, an 11.5 MB image, and the plugin from the same code. The v1 services are unchanged.
+- **No database.** The API server is the compare-and-swap. This deviates from the plan's `V8__action_log`.
+- **Approvals are Kubernetes objects** decided through RBAC.
+- **Approvals bind to agent + action + target + change fingerprint.** API-server retries are recognised by the identical object at the same generation.
+- **Global chain, with an event's place claimed before the single write;** lost races leave signed voids.
+- **Watch cache on every replica, one housekeeper (lease).**
+
+**Bugs found and fixed.** Almost all were found by running against a real API server, not by unit tests.
+
+| Found | How | Fix |
+|---|---|---|
+| **An approved change was refused and its approval burned.** The API server re-runs admission when it retries a conflicting write (a controller updated status in between); the retry found the approval already consumed | Load test, round 10 of 50 | Re-admit only the *identical resulting object* within 10 s, at most 5 times, as event `readmitted` (chapter 17 §4) |
+| **That fix was too loose:** "scale to 3" was admitted *before approval* because an identical scale to 3 had been executed seconds earlier (2→3, back to 2, 2→3 again) | Load test, round 2 (it asserts denial before approval) | Also require the same `metadata.generation`: a change that landed and was reverted has moved it on. Scale objects carry none, so read the workload's. New e2e check: after a revert, the same change needs a new approval |
+| **Scale to zero was read as scale to one.** In the Scale subresource, `replicas: 0` is an absent field (`omitempty`), which the classifier defaulted to 1. So "min 1 replica" didn't block it: it became a request showing "3 → 1" | An e2e check that had *passed silently* | Absent means 0 for Scale, 1 for a workload's pointer field; a unit test with the wire encoding |
+| The e2e script's `grep … && ok` checks could fail without failing the run | Noticed a missing ✓ line | Every check is `if …; then ok; else die`; failures print what was received |
+| **Approved path p99 266 ms.** Every write first read the object; each replica's private cache went stale when another replica wrote; the three housekeeping loops started together, ticked in lockstep and raced on **30 of 50 approvals** | Load test numbers; logging each lost race with its cause | Watch-fed cache on every replica, one housekeeper holding a Lease. p99 **42.9 ms**, zero lost races in the final run (Figure 15.10) |
+| Claiming the chain place before checking state made every refused attempt a void. Replaying a spent capability would grow the chain head without bound | The `docker run` quickstart: the second spend left `voided: 1` | Check the transition against current state before claiming; a unit test asserts three replays write nothing |
+| 50 parallel identical attempts created 50 pending requests (check-then-create) | Unit test | Request ids derived from the approval key and a counter, so create-if-absent keeps one; losers join it |
+| Binary 45.7 MB, more than estimated | Measuring | Narrowed the full Kubernetes clientset to the 4 typed clients used: **37.5 MB**; image 11.5 MB compressed |
+| The guard was unreachable for a moment after its pods reported ready (endpoints publish later) | The e2e outage step | The e2e measures time-to-recover (1 s) instead of assuming 0 |
+| A CRD description with commas broke YAML parsing (fields silently dropped, with API-server warnings) | Install warnings | Quoted |
+
+![Approved agent change, p99 through the API server, fix by fix](images/15-chart-guard-approved-p99.png)
+
+*Figure 15.10: Approved agent change, p99 through the API server, fix by fix*
+
+**Results** (2026-10-23, fresh kind cluster, 3 replicas; chapter 17 §8):
+- **25/25 end-to-end checks** pass on a real API server.
+- **Latency:**
+  - A human's change: p99 4.9 ms (the guard is never called).
+  - An agent's pending change: p99 4.6 ms.
+  - An approved change admitted once: p50 26.8 ms, p99 **42.9 ms**.
+- **Under load:** 615 audit events across 211 requests verify, with no voids.
+- **Guard down:** only agents are stopped; back within 1 s of scaling up.
+- **Tests:** 32 Go tests pass with the race detector. The v1 services are unchanged (212 tests).
+
+---
+
 ## Template for the next entry
 ```
 ## Phase N: <theme>

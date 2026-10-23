@@ -1,0 +1,14 @@
+stateDiagram-v2
+  [*] --> Blocked: policy limit<br/>(protected namespace, deny, min/max replicas)
+  [*] --> Pending: autonomy approve<br/>(or auto with a precondition not observed)
+  [*] --> Approved: autonomy observe,<br/>or auto with every precondition observed
+  Pending --> Approved: a human sets decision=approve<br/>(not an agent, not the requester)
+  Pending --> Denied: a human sets decision=deny
+  Pending --> Expired: pendingTTL (1 h)
+  Approved --> Executed: the identical change is admitted<br/>(or the executor spends the capability)
+  Approved --> Expired: approvalTTL (10 min)
+  Executed --> Executed: API server retry of the same write<br/>(identical object, same generation, ≤ 10 s, ≤ 5x) → readmitted
+  Blocked --> [*]
+  Denied --> [*]
+  Expired --> [*]
+  Executed --> [*]

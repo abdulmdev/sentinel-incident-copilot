@@ -254,3 +254,42 @@ Pod template invariants:
 | Alertmanager log: "Notify for alerts failed … connection refused" | The gateway was down | Nothing: Alertmanager retries and delivered once the gateway was back (seen live) |
 | An alert-opened incident proposed rollback for a pool fault | The previous incident's rollback record looked like a recent deploy | Fixed: rollbacks and rolled-back builds aren't suspects |
 | One fault opened two incidents | Two rules (`DbPoolSaturated`, `HighErrorRatio`) fired for one service | Fixed: per-service correlation under an advisory lock |
+
+## 8. Sentinel Guard
+Install: `helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard -n sentinel-system --create-namespace`, or `kubectl apply -f` the release's `install.yaml`, or `docker run ghcr.io/abdulmdev/sentinel-guard` (single process). The user guide is [docs/guard](../guard/README.md); the design is [chapter 17](17-lld-sentinel-guard.md). End-to-end test on kind: `scripts/guard-e2e.sh` (`KEEP=1` keeps the cluster, `LOAD=1` measures latency).
+
+### 8.1 Environment (`guard/cmd/sentinel-guard`)
+| Variable | Default | Purpose |
+|---|---|---|
+| `SENTINEL_GUARD_MODE` | `kubernetes` when `KUBERNETES_SERVICE_HOST` is set, else `memory` | `kubernetes`: webhooks + API, state in ActionRequests; `memory`: one process, HTTP approvals, state in memory |
+| `SENTINEL_GUARD_POLICY` | built-in `guard/policies/default.yaml` | Policy file (the chart mounts its `policy:` value here) |
+| `SENTINEL_GUARD_ADDR` | `:8443` (kubernetes, TLS) / `:8080` (memory) | API and webhook listener |
+| `SENTINEL_GUARD_METRICS_ADDR` | `:9090` | Prometheus metrics (plain HTTP) |
+| `POD_NAMESPACE`, `POD_NAME`, `SERVICE_ACCOUNT` | `sentinel-system`, random, `sentinel-guard` | The guard's own namespace (where its objects live; also a protected namespace), lease identity, and its own identity (the only one allowed to manage ActionRequests) |
+| `SENTINEL_GUARD_SERVICE` | `sentinel-guard` | Service name for the serving certificate |
+| `SENTINEL_GUARD_VALIDATING_WEBHOOK`, `SENTINEL_GUARD_MUTATING_WEBHOOK` | `sentinel-guard` | Webhook configurations whose CA bundle the guard maintains |
+| `SENTINEL_GUARD_ISSUER` | `sentinel-guard` | `iss` of capabilities |
+| `SENTINEL_GUARD_AGENT_TOKENS` | generated `demo-agent` token (printed once) | memory mode: `name=token,…` for agents |
+| `SENTINEL_GUARD_ADMIN_TOKEN` | generated (printed once) | memory mode: the approver token for HTTP approvals |
+| `KUBERNETES_SERVICE_HOST` | set by Kubernetes | Only used to pick the default mode |
+| `SENTINEL_GUARD_NAMESPACE` | `sentinel-system` | kubectl plugin: where the guard runs (or `--guard-namespace`) |
+
+### 8.2 Chart values (`deploy/helm/sentinel-guard`)
+| Value | Default | Purpose |
+|---|---|---|
+| `agents.groups`, `agents.users` | `[system:serviceaccounts:agents]`, `[]` | Who is an agent: rendered into the webhook's `matchConditions` **and** the policy, so the two can't drift |
+| `approvers.users`, `approvers.groups` | `[]` | RoleBinding to `sentinel-guard-approver` in the release namespace |
+| `policy` | see `values.yaml` | The policy (chapter 17 §2; user guide "Policy"); a change rolls the pods (checksum annotation) |
+| `replicas` | 3 | Spread across zones and nodes (topology spread), `maxUnavailable: 1` PDB |
+| `webhook.timeoutSeconds`, `webhook.guardCreate`, `webhook.extraRules` | 5, false, `[]` | Webhook timeout; also guard agents' creates; more resources to guard |
+| `createNamespace` | false | Render the Namespace (used for `install.yaml`) |
+| `networkPolicy.enabled`, `serviceMonitor.enabled` | false, false | Optional extras |
+| `image.repository`, `image.tag` | `ghcr.io/abdulmdev/sentinel-guard`, the chart's appVersion | |
+
+### 8.3 Operations
+- **Approve:** `kubectl sentinel approve <id> [-m note]`, or `kubectl -n sentinel-system patch actionrequest <id> --type merge -p '{"spec":{"decision":"approve"}}'`.
+- **Verify the audit trail:** `kubectl sentinel audit verify` (needs read access to ActionRequests and the two ConfigMaps; exit code 2 on any problem).
+- **Break-glass:** `kubectl delete validatingwebhookconfiguration sentinel-guard` stops enforcement (re-apply the chart to restore). The deletion is in the Kubernetes audit log.
+- **Rotate the TLS certificate or signing key:** delete the Secret (`sentinel-guard-tls` / `sentinel-guard-signing`) and restart the pods. A new signing key invalidates outstanding capabilities and starts a new key id; events signed with the old key verify only while its public key is still published (key history is on the roadmap, chapter 16).
+- **Release:** pushing a `v2.*` tag runs `.github/workflows/release-guard.yml`: signed multi-arch image with SBOM and provenance, OCI chart, `install.yaml`, the plugin for 5 platforms, the krew manifest.
+

@@ -1,0 +1,35 @@
+flowchart LR
+  subgraph callers["Who changes the cluster"]
+    agent["AI agent<br/>(ServiceAccount in an agent group)"]
+    human["Human / CI / controllers"]
+    approver["Approver<br/>kubectl sentinel approve"]
+  end
+  api["kube-apiserver"]
+  subgraph guardns["sentinel-system"]
+    direction TB
+    subgraph replicas["sentinel-guard (3 replicas, PDB, spread across zones)"]
+      wh["/admission/workloads<br/>classify → policy → consume once"]
+      ap["/admission/approvals<br/>stamp decidedBy, refuse agents"]
+      cache["watch cache (informer)"]
+      leader["lease holder:<br/>apply decisions, expire, CA bundle"]
+    end
+    ar[("ActionRequest objects<br/>(spec: request + decision,<br/>status: phase + audit links)")]
+    head[("ConfigMap<br/>audit chain head + voids")]
+    jwks[("ConfigMap<br/>public key (JWKS)")]
+    sec[("Secrets: TLS cert,<br/>signing key (created on first start)")]
+  end
+  prom["Prometheus<br/>(preconditions)"]
+
+  agent -- "scale / restart / delete" --> api
+  human -- "any change (the guard is never called)" --> api
+  api -- "matchConditions: agents only" --> wh
+  approver -- "patch spec.decision" --> api
+  api -- "every ActionRequest change" --> ap
+  wh -- "compare-and-swap writes" --> ar
+  wh --> head
+  cache -. watch .- ar
+  cache -. watch .- head
+  leader --> ar
+  wh -. "auto actions only" .-> prom
+  approver -- "audit verify (reads)" --> ar
+  approver --> jwks

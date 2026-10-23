@@ -100,6 +100,20 @@
   </header>
 
   <section>
+    <h2>🛡️ New in v2 (alpha): Sentinel Guard, envelope protection for any AI agent</h2>
+    <div class="cockpit">
+      <p class="hook">No agent changes your cluster unless policy, or a human, approved that exact change, and then only once.</p>
+      <p>Sentinel's safety core, extracted for coding agents with <code>kubectl</code>, CI and GitOps bots, and LangGraph or MCP agents. It needs no agent code changes, because it enforces at the Kubernetes API. Humans, CI and controllers are never sent to it, so a guard outage stops only agents.</p>
+      <div class="stats">
+        <div class="stat"><b>42.9 ms</b><span>p99 for an approved agent change, admitted once (3 replicas, through the API server)</span></div>
+        <div class="stat"><b>4.6 ms</b><span>p99 for an agent change waiting for approval (a human's: 4.9 ms)</span></div>
+        <div class="stat"><b>25 / 25</b><span>end-to-end checks on a real API server, incl. its write retries and the guard taken down</span></div>
+        <div class="stat"><b>11.5 MB</b><span>one Go binary, no database: state lives in the Kubernetes API</span></div>
+      </div>
+      <p class="note"><code>helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.1 -n sentinel-system --create-namespace</code> · then <code>kubectl sentinel approve &lt;id&gt;</code> · <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md">Sentinel Guard docs →</a></p>
+    </div>
+  </section>
+  <section>
     <h2>✈️ Why Sentinel exists: the cockpit idea</h2>
     <div class="cockpit">
       <p class="hook">Airliners don't rely on a pilot's nerve at 3 a.m. On-call engineers shouldn't have to either.</p>
@@ -125,7 +139,7 @@
       <div class="stat"><b>14–41 s</b><span>time to mitigate, alert → verified healthy (6 live runs, human approval included)</span></div>
       <div class="stat"><b>0</b><span>harmful actions, successful injections and PII leaks on the 112-incident benchmark (rule baseline)</span></div>
       <div class="stat"><b>33.9% → 0%</b><span>harmful fixes proposed by a local 8B model vs. what reaches a human after guardrails</span></div>
-      <div class="stat"><b>212</b><span>automated tests; CI incl. a real Kubernetes end-to-end run, green on first push</span></div>
+      <div class="stat"><b>244</b><span>automated tests; CI incl. two real Kubernetes end-to-end runs</span></div>
     </div>
   </section>
 

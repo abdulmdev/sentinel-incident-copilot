@@ -1,0 +1,149 @@
+# 17. LLD: Sentinel Guard (v2)
+
+Sentinel Guard is Sentinel's safe-action core (approval → single-use capability → execute once → audit), extracted into a service any agent is held to. It enforces at the Kubernetes API with an admission webhook, so unmodified agents can't route around it, and serves an HTTP API for agents outside Kubernetes. Decision record: [ADR-0010](../adr/0010-sentinel-guard.md). User guide: [docs/guard](../guard/README.md).
+
+## 1. Shape
+
+![Sentinel Guard: who calls what, and where state lives](images/17-guard-architecture.png)
+
+*Figure 17.1: Sentinel Guard: who calls what, and where state lives*
+
+| Part | Where | Role |
+|---|---|---|
+| `sentinel-guard` | `guard/cmd/sentinel-guard` | The service: two admission webhooks, the action API, JWKS, metrics. Modes `kubernetes` (in a cluster) and `memory` (one process, `docker run`) |
+| `kubectl-sentinel` | `guard/cmd/kubectl-sentinel` | The kubectl plugin: `requests`, `describe`, `approve`, `deny`, `audit verify` |
+| Core | `guard/internal/guard` | Request lifecycle (`engine.go`), policy (`policy.go`), change classification (`classify.go`), capabilities and signatures (`signer.go`), audit chain (`audit.go`), Prometheus preconditions (`precondition.go`) |
+| Storage | `guard/internal/store` | `Memory` (one process) and `Kube` (ActionRequest objects, watch cache, compare-and-swap writes) |
+| Transport | `guard/internal/server` | HTTP handlers, both webhooks, metrics |
+| Kubernetes glue | `guard/internal/kube` | Creates its TLS certificate and signing key on first start, keeps the webhook CA bundles, publishes the JWKS, TokenReview authentication |
+| Chart | `deploy/helm/sentinel-guard` | CRD, 3 replicas + PDB, RBAC (the guard, approvers, viewers), both webhook configurations, policy ConfigMap |
+| Default policy | `guard/policies/default.yaml` | Embedded in the binary |
+
+One static Go binary (37.5 MB linux/amd64, stripped); the image is 11.5 MB compressed on distroless `static:nonroot`.
+
+## 2. Request lifecycle
+
+![The lifecycle of an action request](images/17-guard-lifecycle.png)
+
+*Figure 17.2: The lifecycle of an action request*
+
+A **request** (`guard.Request`) carries:
+- what was asked: agent, action, target, the human-readable change, the fingerprint, intent, risk, autonomy;
+- the decision: who, when and a note;
+- the outcome: phase, reasons, preconditions, expiry, execution, the exact object admitted and its generation;
+- its links in the audit chain.
+
+`Engine.Evaluate(proposal)`, in order:
+1. **Hard limits** (`Policy.Violations`): autonomy `deny`, a protected namespace (the guard adds its own), a namespace allow-list, `minReplicas`/`maxReplicas`. A violation means **Blocked**: it can't be approved, and repeats within `pendingTTL` reuse one record.
+2. **An earlier request for the same key** (`useExisting`):
+   - an API-server retry of an executed write is re-admitted (§4);
+   - an `Approved` request is consumed (Kubernetes) or yields a capability (API);
+   - a `Pending` one is reported again;
+   - a recent human denial stands.
+3. **A fresh decision.** `observe` is allowed and recorded. `auto` is allowed only if every precondition is observed by the guard. Otherwise a **Pending** request is created, with the guard's precondition results attached.
+
+Dry runs evaluate without recording anything and are admitted with a warning.
+
+**Request ids** are `ar-<first 8 of the key>-<n>`. Concurrent identical attempts compute the same name, so the store's create-if-absent keeps one. An attempt that loses re-evaluates and joins the existing request (`errDuplicate`). The unit test with 50 parallel attempts ends with exactly 2 requests: the executed one and one new pending.
+
+## 3. Classification and the approval binding
+`ClassifyAdmission` (`classify.go`) turns an `AdmissionRequest` into an action:
+
+| Request | Action | Fingerprint |
+|---|---|---|
+| `UPDATE …/scale` | `scale` | `replicas=<n>`. On the wire, Scale's `replicas: 0` is an absent field (`omitempty`); absent is read as 0 there, but as the default 1 for a workload's pointer field |
+| `UPDATE` workload, only `spec.replicas` | `scale` | as above |
+| only the `kubectl.kubernetes.io/restartedAt` template annotation | `restart` | `restart`. The timestamp is not bound, because kubectl stamps a new one on every attempt |
+| container images | `set-image` | `images=<container=image,…>` |
+| any other pod-template change | `rollout` | digest of the normalized new template |
+| other spec fields, or several kinds at once | `update` | digest(s) |
+| `DELETE` | `delete` | `delete` |
+| `CREATE` (opt-in) | `create` | digest of the object without metadata |
+
+Metadata-only changes and status or other subresources are not actions.
+
+The **approval key** is a digest of agent + action + target + fingerprint: an approval admits that and nothing else. The proposal also carries:
+- `Exact`: a digest of the whole resulting object, incl. the restart timestamp;
+- `Generation`: the target's `metadata.generation` before the change.
+
+Both are used only to recognise API-server retries (§4).
+
+## 4. Exactly once on a real API server
+- **Consuming an approval** is a compare-and-swap on the `ActionRequest` (`resourceVersion`): `Approved → Executed`. When replicas race, one wins and the others see `Executed`.
+- **API-server retries.** When a write conflicts (a controller updated status in between), the API server re-reads the object, re-applies the patch and **runs admission again**. The first call already consumed the approval, so the retry was denied and the approval burned (found by the e2e load test, §8).
+  - The guard now re-admits a write that is the **identical resulting object** (`Exact`) **at the same generation**, within `ReadmitWindow` (10 s), at most `MaxReadmits` (5) times, as event `readmitted`.
+  - Re-applying an identical object can't change anything twice.
+  - A change that landed and was then reverted has moved the generation on twice, so it needs a new approval (found by the same load test).
+  - Scale objects carry no generation; the guard reads the workload's (`get` on deployments, statefulsets and replicasets).
+
+## 5. The audit chain
+Every event (`requested`, `blocked`, `approved`, `denied`, `capability-issued`, `executed`, `readmitted`, `expired`) is a link:
+- `Hash = sha256(seq | prev | type | at | actor | detail | requestId | digest | kid)`.
+- `Digest` covers the request's identity fields, so editing what was requested breaks every event of that request.
+- `Sig` is an ES256 signature over the hash.
+
+The head (`seq`, `hash`) lives in the ConfigMap `sentinel-guard-audit-head`; the public key in `sentinel-guard-jwks`.
+
+**Writes:**
+1. `transition` first checks the change against the current (cached) state. A refused attempt, such as a replayed capability, writes nothing.
+2. It then claims the next place (compare-and-swap on the head).
+3. It writes the state change and the event together.
+
+If step 3 loses a race, the claimed place becomes a **signed void** (`Head.Voids`), so the chain stays complete. A void signed by any other key fails verification, so voids can't hide a deletion (unit test).
+
+**Verification** (`VerifyAudit`, run by `kubectl sentinel audit verify` with only read access) checks:
+- the sequence is contiguous up to the head;
+- every link and signature;
+- the digests against the requests;
+- the head hash.
+
+It reports: an edited request; a deleted request (a gap); a forged event or void; a broken link.
+
+## 6. Kubernetes integration
+- **Workloads webhook** (validating, `failurePolicy: Fail`, `sideEffects: NoneOnDryRun`, 5 s timeout).
+  - Its `matchConditions` select agent groups and users (CEL with `has()` guards, so a missing field can't error and fail closed for everyone).
+  - The handler checks `IsAgent` again. Any error for an agent denies (fail closed).
+- **Approvals webhook** (mutating, on `ActionRequest` create/update/delete):
+  - The guard's own ServiceAccount passes.
+  - Creates and deletes by anyone else are refused, even cluster-admin.
+  - Spec edits other than the decision are refused.
+  - A decision is refused for agent identities, the requester, decided or expired requests. Otherwise it is admitted with a JSON patch that sets `decidedBy` and `decidedAt` from the authenticated identity.
+- **Bootstrap.** On first start the guard creates `sentinel-guard-tls` (a CA plus a serving cert for the Service names, 10-year validity) and `sentinel-guard-signing` (a P-256 key). Replicas racing on create read the winner's copy. The guard writes the CA into both webhook configurations, re-checking every minute, so a re-applied manifest heals itself.
+- **Reads** come from a watch-fed cache (informer on ActionRequests, indexed by approval key; one on the head ConfigMap), plus this replica's own just-written versions until the watch delivers them. **Writes** are compare-and-swap; a stale read costs a conflict and a fresh read, never correctness. Client throttling is raised (QPS 200, burst 400) because the webhook sits on the request path.
+- **Housekeeping** (applying decisions, expiries, the CA bundle) runs every second on the replica holding the `sentinel-guard-housekeeping` Lease (15 s lease, 10 s renew). The admission path also applies a just-made decision inline, so an agent's retry right after an approval doesn't wait for the tick.
+- **Agents on the HTTP API** authenticate with their ServiceAccount token (TokenReview, 30 s cache).
+
+![An approval end to end, including an API-server retry](images/17-guard-seq-approval.png)
+
+*Figure 17.3: An approval end to end, including an API-server retry*
+
+## 7. Capabilities (HTTP API)
+For agents outside Kubernetes, an approved request yields one ES256 JWT:
+- `aud` `sentinel-action`;
+- `request_id`, `action`, `target`, `fingerprint`, `approved_by`, `jti`;
+- it expires with the approval.
+
+It is issued once (`capability-issued` records the `jti`). The executor calls `POST /v1/capabilities/spend`, which verifies it (algorithm pinned, issuer, audience, expiry) and moves the request `Approved → Executed` only if the `jti` matches: single use, enforced by the store's compare-and-swap. The API's fingerprint is a digest of the proposed `change` map, so an approval for €42 doesn't cover €4,200 (unit test).
+
+## 8. Measured
+All numbers from `scripts/guard-e2e.sh` with `LOAD=1` on a fresh kind cluster (1 node, Docker Desktop, Apple Silicon), 3 guard replicas, 2026-10-23. Raw data: [`evals/guard/latency.json`](../../evals/guard/latency.json). Latency is measured by the client through the API server (TLS, the webhook call, the guard's work, the write), with `test/loadgen`.
+
+| Scenario | n | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|
+| Human scales a deployment (the guard is never called) | 400 | 2.3 ms | 3.4 ms | 4.9 ms | 9.5 ms |
+| Agent repeats a change that's pending (denied after a cache lookup) | 400 | 2.1 ms | 3.2 ms | 4.6 ms | 12.6 ms |
+| Agent's change after a human approved it (admitted once) | 100 | 26.8 ms | 35.6 ms | **42.9 ms** | 45.2 ms |
+| Worst case: approval and retry in the same instant (the decision is applied on the request path) | 100 | 23.7 ms | 31.1 ms | 37.5 ms | 43.6 ms |
+
+![Sentinel Guard: p99 latency through the API server](images/17-chart-guard-latency.png)
+
+*Figure 17.4: Sentinel Guard: p99 latency through the API server*
+
+- **What a pending check costs:** the same as no guard at all (2.1 vs 2.3 ms at p50), because it is served from the watch cache.
+- **The approved path** makes two writes: the chain head, and the request's state together with its event. p99 is 42.9 ms, under the 50 ms target.
+- **Safety under load:** every load round also asserts that an unapproved change is denied, that a different change doesn't ride on an approval, and that the same change after a revert needs a new approval. The chain verified after 615 events across 211 requests, **with no voids** (no lost races).
+- **Guard down:** humans' changes still go through and agents' changes are refused. After scaling back up from zero, the guard answered again within **1 s**.
+- **The end-to-end suite:** 25 checks, all passing (chapter 14).
+
+## 9. Configuration
+Environment variables and chart values: [chapter 13 §8](13-deployment-and-operations.md#8-sentinel-guard). Metrics: [chapter 12 §2](12-observability.md#2-metrics-catalog-prometheus). Endpoints and the CRD: [chapter 09 §8](09-api-and-contracts.md#8-sentinel-guard).

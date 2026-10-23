@@ -32,6 +32,19 @@ jobs:
       - run: mvn -B verify
         working-directory: ${{ matrix.service }}
 
+  guard:
+    # Sentinel Guard (Go): format, vet, tests with the race detector, both binaries build.
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: guard } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: guard/go.mod, cache-dependency-path: guard/go.sum }
+      - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go build ./cmd/sentinel-guard ./cmd/kubectl-sentinel
+
   python:
     strategy:
       matrix:
@@ -118,6 +131,11 @@ jobs:
             helm lint $H $overlay
             helm template t $H $overlay | ./kubeconform -strict -summary -skip ExternalSecret
           done
+      - name: Sentinel Guard chart (lint + strict schema validation)
+        # kubeconform has no schema for CRD objects themselves; the real API server validates the CRD in guard-e2e.
+        run: |
+          helm lint deploy/helm/sentinel-guard
+          helm template t deploy/helm/sentinel-guard -n sentinel-system --include-crds | ./kubeconform -strict -summary -skip CustomResourceDefinition
       - name: Least privilege - who may hold which secret (signing keys only in the gateway)
         run: |
           H=deploy/helm/sentinel
@@ -171,10 +189,28 @@ jobs:
       - if: failure()
         run: kubectl -n sentinel get pods; kubectl -n sentinel get events --sort-by=.lastTimestamp | tail -30
 
+  guard-e2e:
+    # Sentinel Guard on a real API server: every safety property, a load run, and the guard taken down.
+    needs: [guard, deploy-config]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: guard/go.mod, cache-dependency-path: guard/go.sum }
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with: { install_only: true }
+      - name: End to end (scripts/guard-e2e.sh)
+        run: |
+          mkdir -p .tools && ln -s "$(command -v kind)" .tools/kind && ln -s "$(command -v helm)" .tools/helm
+          LOAD=1 LOAD_N=100 scripts/guard-e2e.sh
+      - if: failure()
+        run: kubectl -n sentinel-system logs -l app.kubernetes.io/name=sentinel-guard --tail=100 || true
+
   images:
     # Publish on main: one tag per commit (immutable in ECR/GHCR), multi-arch for Graviton nodes.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [kind-e2e, eval-gate]
+    needs: [kind-e2e, eval-gate, guard-e2e]
     runs-on: ubuntu-latest
     permissions: { contents: read, packages: write }
     strategy:
@@ -187,6 +223,7 @@ jobs:
           - { name: mcp-remediation, context: mcp-tools/remediation }
           - { name: chaos-lab, context: chaos-lab/service }
           - { name: web, context: web }
+          - { name: guard, context: guard }
     steps:
       - uses: actions/checkout@v4
       - if: matrix.java

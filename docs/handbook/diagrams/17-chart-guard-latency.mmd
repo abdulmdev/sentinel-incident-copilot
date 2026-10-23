@@ -1,0 +1,13 @@
+---
+config:
+  xyChart:
+    showDataLabel: true
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#1f7a4d"
+---
+xychart-beta
+  title "Sentinel Guard: p99 latency through the API server (ms, kind, 3 replicas)"
+  x-axis ["human", "agent: pending", "agent: approved", "approve + retry"]
+  y-axis "milliseconds" 0 --> 60
+  bar [4.9, 4.6, 42.9, 37.5]

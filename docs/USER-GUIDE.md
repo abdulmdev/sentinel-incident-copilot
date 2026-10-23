@@ -107,6 +107,9 @@ The console is then at http://localhost:13000 and the API at http://localhost:18
 | The same benchmark with a local LLM (~1 h) | `uv run --project agent-service python evals/rca/run.py --mode llm --provider ollama` |
 | All tests | [chapter 14](handbook/14-testing-and-ci.md); CI runs them on every push |
 
+## Guard any AI agent (Sentinel Guard, v2 alpha)
+Sentinel's approval and exactly-once core also runs on its own, for any agent that changes your Kubernetes cluster (coding agents, CI bots, LangGraph or MCP agents), with no code changes. Install it with Helm, approve with `kubectl sentinel approve <id>`, and verify the signed audit trail with `kubectl sentinel audit verify`. See the [Sentinel Guard guide](guard/README.md).
+
 ## Where to read more
 - [Engineering handbook](handbook/README.md), also as a [PDF](Sentinel-Handbook.pdf): architecture, every service's design, security, operations, and the full build history.
 - [Demo script](DEMO.md) for a 3-minute walkthrough.

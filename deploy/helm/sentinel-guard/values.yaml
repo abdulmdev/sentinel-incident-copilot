@@ -1,0 +1,60 @@
+# Sentinel Guard. Install:
+#   helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard -n sentinel-system --create-namespace
+
+image:
+  repository: ghcr.io/abdulmdev/sentinel-guard
+  tag: ""            # defaults to the chart's appVersion
+  pullPolicy: IfNotPresent
+
+# Three replicas across nodes/zones: the guard sits on agents' request path. State lives in the
+# Kubernetes API (ActionRequest objects), so replicas need no database.
+replicas: 3
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+  limits: {memory: 256Mi}
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+
+# Who counts as an AI agent. Only these identities are ever sent to the guard (the webhook's
+# matchConditions), so if the guard is down, humans, CI and controllers are unaffected and only
+# agents wait (fail closed).
+agents:
+  groups: ["system:serviceaccounts:agents"]   # every ServiceAccount in the "agents" namespace
+  users: []                                   # e.g. system:serviceaccount:ci:deploy-bot
+
+# Who may approve or deny agent actions (RoleBinding to the approver role in this namespace).
+approvers:
+  users: []
+  groups: []
+
+# The policy (see docs/guard/README.md). "agents" above is merged in.
+policy:
+  defaults: {risk: medium, autonomy: approve}
+  pendingTTL: 1h
+  approvalTTL: 10m
+  protectedNamespaces: [kube-system, kube-public, kube-node-lease]
+  actions:
+    restart:   {risk: medium}
+    scale:     {risk: medium, minReplicas: 1, maxReplicas: 20}
+    set-image: {risk: high}
+    rollout:   {risk: high}
+    update:    {risk: high}
+    delete:    {risk: high}
+    create:    {risk: low, autonomy: observe}
+  # prometheus: {url: http://prometheus-server.monitoring.svc}
+
+webhook:
+  timeoutSeconds: 5
+  # Also send agents' CREATE requests (recorded under the "create" action; observe by default).
+  guardCreate: false
+  extraRules: []
+
+# Install the namespace too (used to render the plain install.yaml).
+createNamespace: false
+
+networkPolicy:
+  enabled: false   # allow only the API server (any source on 8443) and metrics scrapes
+
+serviceMonitor:
+  enabled: false

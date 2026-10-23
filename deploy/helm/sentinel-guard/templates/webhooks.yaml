@@ -1,0 +1,67 @@
+# Enforcement: agents' changes to workloads and deletions of common objects. matchConditions keep
+# everyone who is not an agent away from the guard entirely: a guard outage cannot block them.
+# The CA bundle is filled in by the guard itself on start.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: sentinel-guard
+  labels: {{- include "guard.labels" . | nindent 4 }}
+webhooks:
+  - name: workloads.guard.sentinel.dev
+    admissionReviewVersions: [v1]
+    sideEffects: NoneOnDryRun
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service: {name: sentinel-guard, namespace: {{ .Release.Namespace }}, path: /admission/workloads, port: 443}
+    matchConditions:
+      - name: agents-only
+        expression: {{ include "guard.agentMatch" . | quote }}
+    rules:
+      - apiGroups: [apps]
+        apiVersions: ["*"]
+        resources: [deployments, statefulsets, daemonsets, replicasets, deployments/scale, statefulsets/scale, replicasets/scale]
+        operations: {{ if .Values.webhook.guardCreate }}[CREATE, UPDATE, DELETE]{{ else }}[UPDATE, DELETE]{{ end }}
+        scope: Namespaced
+      - apiGroups: [""]
+        apiVersions: [v1]
+        resources: [pods, services, configmaps, secrets, persistentvolumeclaims, serviceaccounts]
+        operations: [DELETE]
+        scope: Namespaced
+      - apiGroups: [batch]
+        apiVersions: ["*"]
+        resources: [jobs, cronjobs]
+        operations: [DELETE]
+        scope: Namespaced
+      - apiGroups: [""]
+        apiVersions: [v1]
+        resources: [namespaces]
+        operations: [DELETE]
+        scope: Cluster
+      {{- with .Values.webhook.extraRules }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+---
+# Approval integrity: only the guard creates or deletes ActionRequests; a human decision is
+# stamped with the identity the API server authenticated.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: sentinel-guard
+  labels: {{- include "guard.labels" . | nindent 4 }}
+webhooks:
+  - name: approvals.guard.sentinel.dev
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: Fail
+    reinvocationPolicy: Never
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service: {name: sentinel-guard, namespace: {{ .Release.Namespace }}, path: /admission/approvals, port: 443}
+    rules:
+      - apiGroups: [sentinel.dev]
+        apiVersions: ["*"]
+        resources: [actionrequests]
+        operations: [CREATE, UPDATE, DELETE]
+        scope: Namespaced

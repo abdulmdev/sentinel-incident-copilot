@@ -209,3 +209,35 @@ Example JSON-RPC call (any MCP client sends these):
 | Alertmanager webhook v4 | Alertmanager → gateway | `AlertSecurityTest` (real JSON body through the full filter chain); `amtool check-config` for the sender side |
 
 **Changing a contract:** update the fixture first, then both sides; both test suites must pass in the same change.
+
+## 8. Sentinel Guard
+Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8080 in single-process mode; metrics on 9090.
+
+### 8.1 Action API
+| Method and path | Auth | Request → response |
+|---|---|---|
+| `POST /v1/actions` | agent: ServiceAccount token (TokenReview) in Kubernetes; `SENTINEL_GUARD_AGENT_TOKENS` in memory mode | `{action, target: {name, namespace?, group?, resource?}, change?: {k: v}, intent?, dryRun?}` (unknown fields → 400) → `200 {verdict: "allow", request, capability, message}` · `202 {verdict: "pending", request, reasons, message}` · `403 {verdict: "block", …}`. The fingerprint is a digest of `change` |
+| `GET /v1/actions/{id}` | the requesting agent (others get 404) | as above; once approved, the capability is returned **once** |
+| `POST /v1/capabilities/spend` | none (the capability is the credential) | `{capability, executor?}` → `200 {request, claims}` · `409` already used / no longer valid · `403` invalid (signature, `alg`, issuer, audience, expiry) |
+| `GET /v1/actions` | admin token (memory mode) | `{requests: [...]}` |
+| `POST /v1/actions/{id}/approve`, `/deny` | admin token (memory mode); 404 in Kubernetes (approve with `kubectl sentinel`) | `{approver, note?}` → the request. 403 for the requester; 409 if decided or expired |
+| `GET /v1/audit/verify` | admin token | `{ok, events, requests, headSeq, voided, problems[]}` |
+| `GET /.well-known/jwks.json` | none | ES256 public key (`kid` = thumbprint) |
+| `GET /healthz`, `/readyz` | none | readiness waits for the watch cache and bootstrap |
+
+**Capability** (ES256 JWT, `kid`):
+- `iss`: `SENTINEL_GUARD_ISSUER`;
+- `aud`: `sentinel-action`;
+- `sub`: the agent;
+- `jti`, `iat`, `exp` (= the approval's expiry);
+- `request_id`, `action`, `target`, `fingerprint`, `approved_by`.
+
+### 8.2 Admission webhooks
+| Webhook | Path | Sees | Answers |
+|---|---|---|---|
+| `workloads.guard.sentinel.dev` (validating, fail closed) | `/admission/workloads` | agents' (by `matchConditions`) UPDATE/DELETE of workloads and scale subresources; DELETE of common objects; opt-in CREATE | allowed (approved/readmitted/observe/auto, or a dry run, with a warning) or 403 with the request id and the approve command. Audit annotations: `verdict`, `action`, `request` |
+| `approvals.guard.sentinel.dev` (mutating, fail closed) | `/admission/approvals` | every ActionRequest CREATE/UPDATE/DELETE | the guard's own SA: allowed; others: only `spec.decision` (`approve`/`deny`) once, plus `decisionNote`, patched with `decidedBy`/`decidedAt` from the authenticated user |
+
+### 8.3 kubectl plugin
+`kubectl sentinel requests [--all] [-o json]` · `describe <id>` · `approve <id> [-m note]` · `deny <id> [-m note]` · `audit verify` (exit 2 on any problem) · `version`. Flags: `--guard-namespace`, `--context`, `--kubeconfig`.
+

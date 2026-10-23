@@ -5,8 +5,8 @@
 Checks:
   1. every relative Markdown link in docs/ and README.md resolves to a file
   2. every Flyway migration is documented in the data-model chapter
-  3. every environment variable read by code is in the configuration reference
-  4. every Prometheus metric we define is in the observability metrics catalog
+  3. every environment variable read by code (Java, Python, TypeScript, Go) is in the configuration reference
+  4. every Prometheus metric we define (including Sentinel Guard's) is in the observability metrics catalog
   5. every diagram source (docs/handbook/diagrams/*.mmd) has an up-to-date rendered SVG + PNG
 """
 from __future__ import annotations
@@ -57,6 +57,8 @@ def env_vars() -> set[str]:
         found |= set(re.findall(r"process\.env\.([A-Z0-9_]+)", p.read_text()))
     for p in files("application.yml"):
         found |= set(re.findall(r"\$\{([A-Z][A-Z0-9_]+):", p.read_text()))
+    for p in files("*.go", ROOT / "guard" / "cmd"):  # Sentinel Guard: env("X", ...) and os.Getenv("X")
+        found |= set(re.findall(r'(?:env|os\.Getenv)\("([A-Z][A-Z0-9_]+)"', p.read_text()))
     return found - {"NODE_ENV"}
 
 
@@ -70,6 +72,8 @@ def metrics() -> set[str]:
     found: set[str] = set()
     for p in [*files("*.py", ROOT / "agent-service" / "app")]:
         found |= set(re.findall(r'(?:Counter|Histogram|Gauge)\(\s*"([a-z_]+)"', p.read_text()))
+    for p in files("*.go", ROOT / "guard" / "internal"):
+        found |= set(re.findall(r'Name:\s*"(sentinel_guard_[a-z_]+)"', p.read_text()))
     for p in [*files("*.java", ROOT / "gateway-service" / "src" / "main"),
               *files("*.java", ROOT / "ingestion-service" / "src" / "main")]:
         for name in re.findall(r'(?:counter|timer)\("(sentinel\.[a-z.]+)"', p.read_text()):

@@ -1,0 +1,122 @@
+# The guard's own permissions: its state (ActionRequests, two ConfigMaps, two Secrets it creates
+# on first start) in its namespace, its two webhook configurations (CA bundle), and TokenReviews.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sentinel-guard
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "guard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [sentinel.dev]
+    resources: [actionrequests]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [sentinel.dev]
+    resources: [actionrequests/status]
+    verbs: [get, update, patch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [sentinel-guard-audit-head, sentinel-guard-jwks]
+    verbs: [get, update, list, watch]
+  # One replica at a time does housekeeping (applying decisions, expiries).
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [sentinel-guard-housekeeping]
+    verbs: [get, update]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [sentinel-guard-tls, sentinel-guard-signing]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sentinel-guard
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "guard.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: sentinel-guard}
+subjects:
+  - {kind: ServiceAccount, name: sentinel-guard, namespace: {{ .Release.Namespace }}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sentinel-guard
+  labels: {{- include "guard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingwebhookconfigurations, mutatingwebhookconfigurations]
+    resourceNames: [sentinel-guard]
+    verbs: [get, update]
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+  # Scale requests carry no generation: the guard reads the workload's to tell an API server retry
+  # from a new attempt.
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, replicasets]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sentinel-guard
+  labels: {{- include "guard.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sentinel-guard}
+subjects:
+  - {kind: ServiceAccount, name: sentinel-guard, namespace: {{ .Release.Namespace }}}
+---
+# Approvers: see requests, approve or deny them (the webhook still refuses agents and the requester),
+# and read the public keys and chain head to verify the audit trail.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sentinel-guard-approver
+  labels: {{- include "guard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [sentinel.dev]
+    resources: [actionrequests]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [sentinel-guard-audit-head, sentinel-guard-jwks]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sentinel-guard-viewer
+  labels: {{- include "guard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [sentinel.dev]
+    resources: [actionrequests]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [sentinel-guard-audit-head, sentinel-guard-jwks]
+    verbs: [get]
+{{- if or .Values.approvers.users .Values.approvers.groups }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sentinel-guard-approvers
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "guard.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sentinel-guard-approver}
+subjects:
+  {{- range .Values.approvers.users }}
+  - {apiGroup: rbac.authorization.k8s.io, kind: User, name: {{ . | quote }}}
+  {{- end }}
+  {{- range .Values.approvers.groups }}
+  - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: {{ . | quote }}}
+  {{- end }}
+{{- end }}

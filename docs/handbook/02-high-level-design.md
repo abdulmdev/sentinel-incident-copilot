@@ -217,3 +217,7 @@ Every intervention is recorded and measured (ADR-0006, chapter 11).
 | [0007](../adr/0007-deployment-kubernetes-and-aws.md) | Helm on Kubernetes, Terraform on AWS |
 | [0008](../adr/0008-closed-loop-capabilities-and-alert-intake.md) | Close the loop: alert intake, capability-gated execution, verified recovery |
 | [0009](../adr/0009-zero-trust-identity.md) | Zero-trust identity: asymmetric service tokens, OIDC users, every hop authenticated, checkpoint RLS |
+| [0010](../adr/0010-sentinel-guard.md) | Sentinel Guard: the safe-action core as a Kubernetes-native Go service any agent is held to; state in the API server; approvals through RBAC |
+
+### 6.7 Sentinel Guard (v2)
+From Phase 10, the approval → single-use → audit core also ships on its own as **Sentinel Guard** (`guard/`, [chapter 17](17-lld-sentinel-guard.md)). It enforces at the Kubernetes API for any agent identity: an admission webhook that only agents are sent to, approvals as `ActionRequest` objects decided with `kubectl sentinel`, and a signed hash-chained audit. It also serves an HTTP action API for agents outside Kubernetes. The incident copilot described in this chapter is unchanged; moving its approvals onto the guard is on the roadmap (chapter 16).

@@ -2,7 +2,7 @@
 
 The complete reference for Sentinel: what it is, how it's designed (high level and low level), why each decision was made, how it's tested, deployed and operated, and what happened in each phase of building it.
 
-> **Status:** current as of **Phase 9: Publish and measure (2026-10-20)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
+> **Status:** current as of **Phase 10: Sentinel Guard, v2 alpha (2026-10-23)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
 
 ## How to read it
 
@@ -19,15 +19,16 @@ The complete reference for Sentinel: what it is, how it's designed (high level a
 | Add or change tests / CI | [14 Testing & CI](14-testing-and-ci.md) |
 | Know how we got here and what broke along the way | [15 Phase history](15-phase-history.md) |
 | Know what's missing | [16 Limitations & roadmap](16-limitations-and-roadmap.md) |
+| Use or change Sentinel Guard (v2) | [17 Sentinel Guard](17-lld-sentinel-guard.md) and the [user guide](../guard/README.md) |
 
 **Single-file versions** (every chapter, figure and screenshot in one document):
 - [`docs/Sentinel-Handbook.pdf`](../Sentinel-Handbook.pdf): A4, cover, contents, page numbers.
 - [`Sentinel-Handbook.html`](Sentinel-Handbook.html): self-contained, opens in any browser.
 
-Shorter companions: the [user guide](../USER-GUIDE.md), the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the nine [architecture decision records](../adr/).
+Shorter companions: the [user guide](../USER-GUIDE.md), the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the ten [architecture decision records](../adr/).
 
 ## Figures
-The handbook has **65 diagrams and charts** (architecture, sequence, state, ER, deployment, flowcharts, data charts) and **13 screenshots of the running system** (console incl. the closed loop, Jaeger, Grafana, Prometheus targets and alerts). Every figure is numbered and captioned.
+The handbook has **74 diagrams and charts** (architecture, sequence, state, ER, deployment, flowcharts, data charts) and **15 screenshots of the running system** (console incl. the closed loop, Jaeger, Grafana, Prometheus targets and alerts). Every figure is numbered and captioned.
 
 | Kind | Source (edit this) | Rendered to | How |
 |---|---|---|---|
@@ -57,6 +58,7 @@ Markdown embeds PNGs so the figures show in any viewer: GitHub, IDEs, the Claude
 | 14 | [Testing & CI](14-testing-and-ci.md) | Test pyramid per service, what each suite proves, CI jobs |
 | 15 | [Phase history](15-phase-history.md) | Each phase: goals, what was built, decisions, bugs found and fixed, results |
 | 16 | [Limitations & roadmap](16-limitations-and-roadmap.md) | Known gaps, risks, and what comes next |
+| 17 | [LLD: Sentinel Guard](17-lld-sentinel-guard.md) | v2: admission webhooks, request lifecycle, approval binding, exactly-once under API-server retries, signed audit chain, Kubernetes state, measured latency |
 
 ## Conventions
 - **Paths** are relative to the repository root, e.g. `agent-service/app/graph.py`.
