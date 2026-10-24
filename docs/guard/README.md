@@ -116,6 +116,18 @@ By default, the webhook sees agents' **updates and deletions** of workloads and 
 
 Server-side dry runs (`--dry-run=server`) are always admitted, with a warning saying what would happen. Metadata-only changes (labels, annotations) and status updates are not actions.
 
+## Use it from your code, or with no code (Phase 12)
+- **Python:** `cap = guard.require("refund", target="order-1042", change={"amount": "42.00 EUR"}, wait=300)`, then `guard.spend(cap.token)` right before acting. Or decorate the function with `@guard.guarded("refund", target="{order_id}")`. See [the Python SDK](../../sdk/python/README.md).
+- **LangChain / LangGraph:** `guard_tool(delete_bucket, guard, target="{bucket}")` gives a guarded copy of any tool, which tells the model to wait for approval instead of acting.
+- **TypeScript / Node:** the same API. See [the TypeScript SDK](../../sdk/typescript/README.md).
+- **Any MCP server, no code:** put [`sentinel-guard-mcp-proxy`](../../examples/mcp-proxy/README.md) between your MCP client (Claude Desktop or Code, Cursor, an agent framework) and the server. Listed tools run only once approved; others pass through or are hidden.
+
+Examples: [a refund agent that needs a human](../../examples/guarded-refunds/README.md), [the filesystem server behind the guard](../../examples/mcp-proxy/README.md).
+
+Where the capability is redeemed decides what you're protected from:
+- In the agent's own process (decorator, wrapper), it stops the model's mistakes and manipulation.
+- In a separate executor, the MCP proxy, or the Kubernetes webhook, it also stops a compromised agent.
+
 ## Policy
 The policy is YAML (the chart's `policy:` value; [the built-in default](../../guard/policies/default.yaml)). Each action gets a risk and an **autonomy** level:
 

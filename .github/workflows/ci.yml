@@ -45,6 +45,25 @@ jobs:
       - run: go test -race ./...
       - run: go build ./cmd/sentinel-guard ./cmd/kubectl-sentinel
 
+  sdks:
+    # The Python and TypeScript SDKs (incl. the MCP proxy) against the real guard binary, not mocks.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: guard/go.mod, cache-dependency-path: guard/go.sum }
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with: { node-version: "24" }
+      - name: Build the guard once
+        run: (cd guard && go build -o "$RUNNER_TEMP/sentinel-guard" ./cmd/sentinel-guard) && echo "SENTINEL_GUARD_BIN=$RUNNER_TEMP/sentinel-guard" >> "$GITHUB_ENV"
+      - name: Python SDK + MCP proxy
+        working-directory: sdk/python
+        run: uv run --frozen pytest
+      - name: TypeScript SDK
+        working-directory: sdk/typescript
+        run: npm ci && npm run build && npm test
+
   python:
     strategy:
       matrix:

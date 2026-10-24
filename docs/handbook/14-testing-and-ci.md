@@ -1,9 +1,11 @@
 # 14 Testing and CI
 
-**252 automated tests** (measured 2026-10-24; 244 after Phase 10, 212 before it):
+**277 automated tests** (measured 2026-10-24; 252 after Phase 11, 244 after Phase 10, 212 before it):
 
 | Suite | Tests |
 |---|---|
+| Python SDK + MCP proxy | 19 (against the real guard binary) |
+| TypeScript SDK | 6 (against the real guard binary) |
 | gateway | 93 (67 unit/slice + 26 integration) |
 | sentinel-guard (Go) | 34 (30 test functions + 4 subtests), run with the race detector |
 | agent | 72 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
@@ -130,6 +132,29 @@ uv run --project agent-service python evals/rca/run.py --check
   - the plain-HTTP API listener serves no admission webhooks;
   - an ActionRequest's round trip through JSON keeps the audit valid.
 
+### SDKs (Phase 12; `sdk/python`: `uv run pytest`, `sdk/typescript`: `npm test`)
+Both start the real guard (memory mode; built from `guard/`, or `SENTINEL_GUARD_BIN`) and approve through its admin API, as a human would.
+- **Python client (9):**
+  - pending → approved → redeemed once (a second spend → 409);
+  - an approval covers only those parameters (42 vs 4200);
+  - `require(wait=…)` waits for a human;
+  - a denial blocks;
+  - a dry run records nothing;
+  - a forged capability, a wrong token and an unreachable guard all fail closed;
+  - the decorator runs the function once, after approval; the async client and decorator;
+  - **the canonical change encoding, asserted on a golden value shared with the TypeScript tests**.
+- **LangChain wrapper (2):** the wrapped tool keeps its name and arguments, tells the model it must wait, runs once after approval, and fails closed when the guard is unreachable (sync and async guards).
+- **MCP proxy (8):**
+  - upstream tools listed, guarded ones marked, denied ones hidden;
+  - pass-through;
+  - a guarded call is refused until approved, runs once, and different arguments need a new approval;
+  - denied tools never reach the server;
+  - guard down → refused;
+  - `default: guard`;
+  - config validation;
+  - **the real CLI over stdio** (an MCP client launches the proxy, which launches an upstream server).
+- **TypeScript (6):** the same flows, plus the same golden encoding value.
+
 ### mcp-observability (12)
 Discovery over an MCP client session; log grouping; metric parsing; unknown service → tool error; invalid level; single-object wire shape; `probe_service` success rate and p95; **timeouts count as failures and requests are capped at 50**; unknown services rejected; **`/mcp` requires a gateway tool token** (none, wrong audience, missing `telemetry:read`, or a forged key → 401); health stays open.
 
@@ -160,6 +185,7 @@ Each metric's definition, including the edge cases: wrong escalation isn't harmf
 | `docs` | `scripts/check_docs.py`: every Markdown link resolves; every Flyway migration in chapter 08; every env var read by code in chapter 13; every metric in chapter 12 | Docs in sync with code |
 | `web` | `npm ci && npm run build` | Build + types |
 | `deploy-config` | `helm lint` (both charts); `helm template \| kubeconform -strict` for defaults/kind/aws; **`check_chart_secrets.py`** (`--prod`: signing keys only in the gateway, no dev secret anywhere; kind: no signing material outside the gateway/web); `terraform fmt -check`, `init -backend=false`, `validate` | Validity + least privilege |
+| `sdks` | Builds the guard once; the Python SDK + MCP proxy (`uv run --frozen pytest`) and the TypeScript SDK (`npm ci`, build, `node --test`) against it | Tests |
 | `guard` | `gofmt` check, `go vet`, `go test -race ./...`, both binaries build (`deploy-config` also lints the guard chart and validates it with kubeconform; the CRD itself is validated by the real API server in `guard-e2e`) | Tests |
 | `guard-e2e` (needs guard, deploy-config) | `scripts/guard-e2e.sh` with `LOAD=1 LOAD_N=100` on a fresh kind cluster (section 4A) | End to end on a real API server |
 | `kind-e2e` (needs the above) | kind cluster; `scripts/kind-up.sh`; seed knowledge; inject a fault; open an incident → expect `AWAITING_APPROVAL`; **approve → expect `RESOLVED`** (capability → remediation adapter → verification, in-cluster); **assert the console pod can't reach the agent or the remediation adapter** | End to end + NetworkPolicy |

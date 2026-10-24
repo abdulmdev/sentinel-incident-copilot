@@ -154,3 +154,36 @@ All numbers from `scripts/guard-e2e.sh` with `LOAD=1` on a fresh kind cluster (1
 
 ## 9. Configuration
 Environment variables and chart values: [chapter 13 §8](13-deployment-and-operations.md#8-sentinel-guard). Metrics: [chapter 12 §2](12-observability.md#2-metrics-catalog-prometheus). Endpoints and the CRD: [chapter 09 §8](09-api-and-contracts.md#8-sentinel-guard).
+
+## 10. SDKs and the MCP proxy (Phase 12)
+
+![Every kind of agent, one guard: webhook, SDKs, the LangChain wrapper and the MCP proxy](images/17-guard-adoption.png)
+
+*Figure 17.5: Every kind of agent, one guard: webhook, SDKs, the LangChain wrapper and the MCP proxy*
+
+Design record: [ADR-0012](../adr/0012-sdks-and-the-mcp-proxy.md).
+
+| Piece | Where | What it does |
+|---|---|---|
+| Python SDK | `sdk/python/sentinel_guard/client.py` | `Guard` / `AsyncGuard`: `propose`, `status`, `require(…, wait)` (polls `GET /v1/actions/{id}` until allowed, blocked or out of time), `spend`, the `guarded` decorator (approval bound to all arguments by default; `target` and `change` as values, `"{arg}"` templates or callables) |
+| LangChain wrapper | `sdk/python/sentinel_guard/langchain.py` | `guard_tool(tool, guard, …)`: same name, description (plus a note) and arguments; while not allowed, it returns an explanation **to the model** instead of acting |
+| MCP proxy | `sdk/python/sentinel_guard/mcp_proxy.py`, CLI `sentinel-guard-mcp-proxy` | stdio MCP server in front of any MCP server (stdio or streamable HTTP). Per tool `pass`, `guard` or `deny`; upstream results returned unchanged; refusals are error results |
+| TypeScript SDK | `sdk/typescript/src/index.ts` | `Guard`: the same `propose`, `status`, `require`, `spend`, `guarded`; zero dependencies |
+
+**Errors fail closed in both SDKs:**
+- `ApprovalPending` (with the request id to show a human);
+- `ActionBlocked` (policy, or a human denied it);
+- `CapabilityRejected` (already used, expired, forged);
+- `GuardUnavailable` (unreachable, or any unexpected status such as a 401: never read as permission).
+
+**The change encoding is canonical and shared.** Strings stay as they are; anything else becomes compact JSON with sorted keys (`canonical_change` / `canonicalChange`). The approval binds to the fingerprint of these values, so both SDKs must agree byte for byte; a golden value is asserted in both test suites.
+
+**Where the capability is redeemed decides the protection** (ADR-0012 §4):
+- **The decorator and the wrapper** redeem in the agent's own process. That stops the model's mistakes and manipulation, not a compromised process.
+- **A separate executor, the MCP proxy, or the webhook** also stop a compromised agent.
+
+**Measured:** both SDKs and the proxy run against the real guard binary in CI (`sdks` job).
+- Python: 19 tests, including the proxy launched by a real MCP client over stdio, launching a real upstream server.
+- TypeScript: 6 tests.
+- The refund example (`examples/guarded-refunds`) ran as documented: pending → approved with the printed `curl` → refunded once → the same refund again opened a new request.
+

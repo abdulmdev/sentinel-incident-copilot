@@ -316,3 +316,21 @@ Components with **`guardIdentity: true`** (agent, gateway) get:
 
 **kind** (`values-kind.yaml`) uses the locally built `sentinel/guard:dev` image with 1 replica.
 
+### 8.5 SDKs and the MCP proxy (Phase 12)
+- **Python:** `pip install "sentinel-guard[langchain,mcp] @ git+https://github.com/abdulmdev/sentinel-incident-copilot#subdirectory=sdk/python"`.
+- **TypeScript:** build `sdk/typescript` (`npm ci && npm run build`) and install from the folder. Not published to PyPI/npm yet.
+- **Both read** `SENTINEL_GUARD_URL` (default `http://localhost:8080`) and `SENTINEL_GUARD_TOKEN`; Python also reads `SENTINEL_GUARD_TOKEN_FILE` (a projected ServiceAccount token, re-read on every call).
+
+**The proxy** (`sentinel-guard-mcp-proxy --config proxy.yaml`):
+
+| Key | Meaning |
+|---|---|
+| `guard.url`, `guard.token`, `guard.token_env`, `guard.token_file` | Where the guard is and how the proxy authenticates as the agent (default token: `SENTINEL_GUARD_TOKEN`) |
+| `upstream.command` (+ `env`, `cwd`) or `upstream.url` (+ `headers`) | The MCP server to front: stdio command, or streamable HTTP |
+| `default` | Unlisted tools: `pass` (default), `guard` or `deny` |
+| `tools.<name>.mode` | `guard` (default for a listed tool), `pass` or `deny` (hidden and refused) |
+| `tools.<name>.action`, `.target`, `.namespace` | The guard request: action (default: the tool name), target (`"{arg}"` template; default: the tool name), scope |
+| `tools.<name>.change` | Which arguments bind the approval (default: all of them) |
+
+Unknown keys and modes are rejected at start.
+

@@ -43,6 +43,13 @@ Approved ar-c8f4166c-1: scale of shop/deployment/checkout (replicas: 2 → 3), b
 - **Small.** One Go binary, an 11.5 MB image, no database. Its state lives in the Kubernetes API, and 3 replicas share it.
 - **Measured** (p99 through the API server, 3 replicas): a human's change 4.9 ms, an agent's pending change 4.6 ms, an approved change admitted once 42.9 ms.
 
+- **Any agent, not just kubectl:**
+  - **Python** and **TypeScript** SDKs: `guard.require(...)`, then `guard.spend(...)`, or a decorator;
+  - a **LangChain/LangGraph** tool wrapper that tells the model to wait for approval;
+  - a **zero-code MCP proxy** that puts the guard in front of any MCP server's tools, for Claude Desktop or Code, Cursor and agent frameworks.
+
+  See [the SDKs](sdk/python/README.md) and the [examples](examples/).
+
 Also `kubectl apply -f install.yaml`, `docker run ghcr.io/abdulmdev/sentinel-guard` (single process, HTTP API for agents outside Kubernetes), and `kubectl krew install sentinel/sentinel`. **[Sentinel Guard docs →](docs/guard/README.md)**
 
 ## ✈️ Why Sentinel exists: the cockpit idea
@@ -87,7 +94,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 | **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **252** automated tests (incl. 34 for Sentinel Guard), plus 25 Guard checks on a real API server; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **277** automated tests (incl. 34 for Sentinel Guard and 25 for its SDKs), plus 25 Guard checks on a real API server; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 
@@ -223,6 +230,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 | 9 Publish and measure | Full local-LLM benchmark; runbook preconditions take gemma4 from 11.6% to **0%** harmful actions |
 | 10 Sentinel Guard (v2 alpha) | The safety core as a Kubernetes-native Go service for any agent; exactly-once proven on a real API server, including its write retries; p99 **42.9 ms** for an approved change |
 | 11 The copilot on the guard | One safety core: the agent proposes to the guard, console approvals are recorded there by the gateway, the adapter redeems the guard's capability; live: alert → **verified fix in 24.4 s** |
+| 12 SDKs and the MCP proxy | Python and TypeScript SDKs, a LangChain/LangGraph wrapper and a zero-code MCP proxy, tested against the real guard |
 
 <details>
 <summary><b>All design decisions and their reasons</b></summary>

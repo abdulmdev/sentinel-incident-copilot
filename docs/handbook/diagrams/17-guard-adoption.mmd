@@ -1,0 +1,23 @@
+flowchart LR
+  subgraph agents["Agents"]
+    K["coding agent / CI bot<br/>with kubectl"]
+    PY["Python agent<br/>(any framework)"]
+    LG["LangChain / LangGraph<br/>agent"]
+    TS["Node / TypeScript<br/>agent"]
+    MC["MCP client<br/>Claude Desktop/Code, Cursor"]
+  end
+  subgraph ways["How each reaches Sentinel Guard"]
+    WH["admission webhook<br/>no code"]
+    SDK["SDK: require → spend<br/>@guard.guarded"]
+    GT["guard_tool(tool)<br/>tells the model to wait"]
+    TSS["TS SDK: require → spend<br/>guard.guarded"]
+    PX["sentinel-guard-mcp-proxy<br/>config only"]
+  end
+  G["Sentinel Guard<br/>policy · approvals · single-use capability · signed audit"]
+  K --> WH --> G
+  PY --> SDK --> G
+  LG --> GT --> G
+  TS --> TSS --> G
+  MC --> PX --> G
+  PX -->|"forwards once allowed"| UP["any MCP server"]
+  H(["a human approves<br/>kubectl sentinel · a delegate's UI · HTTP"]) --> G

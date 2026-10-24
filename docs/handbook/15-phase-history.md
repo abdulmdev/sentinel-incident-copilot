@@ -520,6 +520,41 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 
 ---
 
+## Phase 12: SDKs and the MCP proxy
+**Goal:** most agents don't act through the Kubernetes API. Make Sentinel Guard a few lines of code (Python, TypeScript), one wrapper (LangChain/LangGraph), or zero code (MCP) for them ([ADR-0012](../adr/0012-sdks-and-the-mcp-proxy.md)). Also released **v2.0.0-alpha.2** (Phase 11's guard features; GitHub release, public image and chart, krew index updated).
+
+**Built**
+- **`sdk/python`** (`sentinel-guard`):
+  - `Guard`/`AsyncGuard` (propose, status, `require` with waiting, spend) and the `guarded` decorator;
+  - `sentinel_guard.langchain.guard_tool`;
+  - `sentinel-guard-mcp-proxy` (pass, guard or deny per tool; stdio or HTTP upstream).
+- **`sdk/typescript`** (`@sentinel-guard/sdk`): the same surface, zero dependencies.
+- **Examples:** `examples/guarded-refunds` (a refund agent that needs a human) and `examples/mcp-proxy` (the filesystem MCP server behind the guard, for Claude Code and Desktop and other clients).
+- **CI:** a `sdks` job runs both SDKs against the real guard binary.
+
+**Decisions** (ADR-0012):
+- **Same contract in both SDKs,** with a shared canonical change encoding.
+- **Errors fail closed:** a 401 is `GuardUnavailable`, never permission.
+- **The LangChain wrapper answers the model** instead of raising.
+- **The proxy passes upstream results through untouched** and leaves input validation to the server.
+- **The docs state plainly what in-process redemption does not protect against.**
+
+**Bugs found and fixed**
+
+| Found | How | Fix |
+|---|---|---|
+| **The two SDKs encoded the same change differently** (Python `{"a": 1}`, JavaScript `{"a":1}`), so an approval requested through one would never match a call made through the other | Writing a real cross-SDK test instead of the first, weak "the server accepts it" test | One canonical form (compact, sorted keys) in both; a golden value asserted in both suites; the guard matches an approval across encodings |
+| Proxy tests errored on teardown ("exit cancel scope in a different task") | pytest-asyncio set up and tore down the MCP sessions in different tasks | Each test opens client → proxy → upstream in its own task (`async with proxied(…)`) |
+| The TypeScript README's `npm install github:…#path:` would fail (npm can't install a subfolder of a git repo) | Checking every install line | Build-and-install-from-folder instructions, verified with a clean `npm install` |
+
+**Results** (2026-10-24):
+- **277 automated tests:** the new ones are Python SDK + proxy 19 and TypeScript SDK 6, all against the real guard.
+- **The proxy end to end over stdio:** an MCP client launches it, it launches a real server; the guarded tool is refused until approved, then runs once.
+- **The refund example** behaved as documented: pending; approved with the printed `curl`; refunded once; the same refund again opened request `…-2`.
+- **v2.0.0-alpha.2** published: all 9 release assets; image and chart pull anonymously.
+
+---
+
 ## Template for the next entry
 ```
 ## Phase N: <theme>

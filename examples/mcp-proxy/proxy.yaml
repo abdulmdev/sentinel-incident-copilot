@@ -1,0 +1,13 @@
+# Sentinel Guard in front of the reference filesystem MCP server: reads pass through, writes and
+# moves need a human's approval (bound to their arguments), and nothing may delete the directory.
+guard:
+  url: http://localhost:8080
+  token_env: SENTINEL_GUARD_TOKEN
+upstream:
+  command: [npx, -y, "@modelcontextprotocol/server-filesystem", /tmp/sentinel-demo]
+default: pass
+tools:
+  write_file: {target: "{path}"}
+  edit_file: {target: "{path}"}
+  move_file: {target: "{source}"}
+  create_directory: {target: "{path}"}

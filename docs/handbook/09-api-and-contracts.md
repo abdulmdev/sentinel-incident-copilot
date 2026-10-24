@@ -228,6 +228,8 @@ Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8
 | `GET /.well-known/jwks.json` | none | ES256 public key (`kid` = thumbprint) |
 | `GET /healthz`, `/readyz` | none | readiness waits for the watch cache and bootstrap |
 
+**The change map** binds the approval: the guard fingerprints `change` exactly as sent. The SDKs send a canonical form (strings as they are, anything else compact JSON with sorted keys), identical in Python and TypeScript, so an approval matches either SDK (Phase 12).
+
 **Capability** (ES256 JWT, `kid`):
 - `iss`: `SENTINEL_GUARD_ISSUER`;
 - `aud`: `sentinel-action`;
