@@ -4,6 +4,7 @@ import com.anthropic.errors.AnthropicServiceException;
 import com.anthropic.errors.PermissionDeniedException;
 import com.anthropic.errors.RateLimitException;
 import com.anthropic.errors.UnauthorizedException;
+import dev.sentinel.gateway.remediation.GuardClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -22,6 +23,12 @@ public class ApiErrors {
     @ExceptionHandler(HttpClientErrorException.class)
     ProblemDetail agentClientError(HttpClientErrorException e) {
         return ProblemDetail.forStatusAndDetail(e.getStatusCode(), e.getStatusText());
+    }
+
+    /** The guard refused or couldn't record a decision: nothing was resumed, the incident still waits. */
+    @ExceptionHandler(GuardClient.GuardException.class)
+    ProblemDetail guardRefused(GuardClient.GuardException e) {
+        return ProblemDetail.forStatusAndDetail(e.status(), "Sentinel Guard: " + e.getMessage());
     }
 
     @ExceptionHandler(ResourceAccessException.class)

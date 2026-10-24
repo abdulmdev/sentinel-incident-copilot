@@ -9,8 +9,8 @@ import java.util.concurrent.Executors;
 
 import dev.sentinel.gateway.alert.AlertLinkRepository;
 import dev.sentinel.gateway.mcp.ToolTokens;
+import dev.sentinel.gateway.remediation.GuardClient;
 import dev.sentinel.gateway.remediation.RemediationAuditRepository;
-import dev.sentinel.gateway.remediation.RemediationTokens;
 import io.micrometer.context.ContextExecutorService;
 import io.micrometer.context.ContextSnapshotFactory;
 import jakarta.annotation.PreDestroy;
@@ -22,8 +22,9 @@ import org.springframework.stereotype.Service;
  * The incident lifecycle, shared by humans (console/API) and alerts (Alertmanager).
  *
  * Open: record first (so a failure leaves FAILED, never nothing), mint the read-only tool token,
- * hand the incident to the agent. Decide: on approval of an executable action, mint the single-use
- * capability for exactly that action, let the agent execute and verify, then audit the outcome.
+ * hand the incident to the agent. Decide: record the reviewer's decision in Sentinel Guard, on the
+ * request the agent registered for its proposal (the guard then issues the agent a single-use
+ * capability for exactly that action); resume the agent to execute and verify; audit the outcome.
  */
 @Service
 public class IncidentService {
@@ -32,7 +33,7 @@ public class IncidentService {
 
     private final AgentClient agent;
     private final ToolTokens toolTokens;
-    private final RemediationTokens remediationTokens;
+    private final GuardClient guard;
     private final IncidentRepository incidents;
     private final RemediationAuditRepository audit;
     private final AlertLinkRepository alertLinks;
@@ -41,12 +42,12 @@ public class IncidentService {
     private final ExecutorService background = ContextExecutorService.wrap(
             Executors.newVirtualThreadPerTaskExecutor(), ContextSnapshotFactory.builder().build()::captureAll);
 
-    public IncidentService(AgentClient agent, ToolTokens toolTokens, RemediationTokens remediationTokens,
+    public IncidentService(AgentClient agent, ToolTokens toolTokens, GuardClient guard,
                            IncidentRepository incidents, RemediationAuditRepository audit,
                            AlertLinkRepository alertLinks) {
         this.agent = agent;
         this.toolTokens = toolTokens;
-        this.remediationTokens = remediationTokens;
+        this.guard = guard;
         this.incidents = incidents;
         this.audit = audit;
         this.alertLinks = alertLinks;
@@ -101,24 +102,26 @@ public class IncidentService {
                 ? (Map<String, Object>) r : Map.of();
         String action = (String) rem.get("action");
         String target = (String) rem.get("target");
+        String guardRequest = current.get("approval") instanceof Map<?, ?> a ? (String) a.get("request") : null;
 
-        RemediationTokens.Capability capability = null;
-        if (approved && action != null && !"escalate".equals(action)) {
-            capability = remediationTokens.mint(tenant, id.toString(), action, target, reviewer);
+        // Record the decision in the guard first: if it refuses (expired, already decided, guard down),
+        // nothing is resumed and the incident keeps waiting. A rejection is recorded too, so that
+        // request can never be approved later. Escalations register nothing (nothing to execute).
+        if (guardRequest != null) {
+            guard.decide(guardRequest, approved, reviewer, note);
         }
         Map<String, Object> decision = new HashMap<>();
         decision.put("approved", approved);
         decision.put("reviewer", reviewer); // audit trail uses the authenticated identity
         decision.put("note", note);
-        Map<String, Object> view = agent.decide(tenant, id.toString(), decision,
-                capability == null ? null : capability.token(), toolTokens.mint(tenant, id.toString()));
+        Map<String, Object> view = agent.decide(tenant, id.toString(), decision, toolTokens.mint(tenant, id.toString()));
         incidents.update(tenant, id, view, reviewer);
 
         String status = String.valueOf(view.get("status"));
         if (view.get("execution") instanceof Map<?, ?> exec) {
             Boolean verified = view.get("verification") instanceof Map<?, ?> v ? (Boolean) v.get("healthy") : null;
             audit.record(tenant, new RemediationAuditRepository.Entry(id, action, target, reviewer,
-                    capability == null ? null : capability.jti(), Boolean.TRUE.equals(exec.get("executed")),
+                    (String) exec.get("capability_jti"), guardRequest, Boolean.TRUE.equals(exec.get("executed")),
                     verified, status, (String) exec.get("error")));
         }
         if (IncidentRepository.FINAL.contains(status)) {

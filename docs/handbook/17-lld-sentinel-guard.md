@@ -120,8 +120,15 @@ It reports: an edited request; a deleted request (a gap); a forged event or void
 ## 7. Capabilities (HTTP API)
 For agents outside Kubernetes, an approved request yields one ES256 JWT:
 - `aud` `sentinel-action`;
-- `request_id`, `action`, `target`, `fingerprint`, `approved_by`, `jti`;
+- `request_id`, `action`, `target`, `namespace` (the target's scope: a namespace or, for Sentinel, the tenant), `change` (the approved parameters, for the executor to check), `fingerprint`, `approved_by`, `jti`;
 - it expires with the approval.
+
+**Delegated decisions (Phase 11).** A service that authenticated a person itself may record that person's decision over HTTP, if its identity is listed under the policy's `delegates` (the admin token is the only other way, and only in single-process mode).
+- The request stores `decidedBy` = the person and `decidedVia` = the delegate; the audit event reads "note [via delegate]".
+- A delegate can't decide on behalf of the requester, and the requester can't be the delegate.
+- Sentinel's own gateway is the first delegate: the copilot's console approvals go through it ([ADR-0011](../adr/0011-copilot-approvals-through-the-guard.md)).
+
+**In-cluster API listener.** With `SENTINEL_GUARD_API_ADDR` (chart `api.plainHTTP`), the guard also serves the action API, without the admission webhooks, over plain HTTP. Clients in other namespaces can't trust the webhook's private CA; a NetworkPolicy limits who reaches the port.
 
 It is issued once (`capability-issued` records the `jti`). The executor calls `POST /v1/capabilities/spend`, which verifies it (algorithm pinned, issuer, audience, expiry) and moves the request `Approved → Executed` only if the `jti` matches: single use, enforced by the store's compare-and-swap. The API's fingerprint is a digest of the proposed `change` map, so an approval for €42 doesn't cover €4,200 (unit test).
 

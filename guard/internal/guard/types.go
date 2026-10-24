@@ -94,6 +94,7 @@ type Request struct {
 	// The human (or policy) decision.
 	Decision     string     `json:"decision,omitempty"` // approve | deny
 	DecidedBy    string     `json:"decidedBy,omitempty"`
+	DecidedVia   string     `json:"decidedVia,omitempty"` // the delegate that attested DecidedBy, if any
 	DecisionNote string     `json:"decisionNote,omitempty"`
 	DecidedAt    *time.Time `json:"decidedAt,omitempty"`
 

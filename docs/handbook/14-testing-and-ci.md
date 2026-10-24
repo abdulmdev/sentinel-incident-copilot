@@ -1,13 +1,13 @@
 # 14 Testing and CI
 
-**244 automated tests** (measured 2026-10-23; 212 before Phase 10):
+**252 automated tests** (measured 2026-10-24; 244 after Phase 10, 212 before it):
 
 | Suite | Tests |
 |---|---|
-| gateway | 94 (68 unit/slice + 26 integration) |
-| sentinel-guard (Go) | 32 (28 test functions + 4 subtests), run with the race detector |
-| agent | 68 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
-| mcp-remediation | 14 |
+| gateway | 93 (67 unit/slice + 26 integration) |
+| sentinel-guard (Go) | 34 (30 test functions + 4 subtests), run with the race detector |
+| agent | 72 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
+| mcp-remediation | 17 |
 | eval scorer + runner | 14 |
 | mcp-observability | 12 |
 | ingestion | 10 (7 + 3) |
@@ -60,8 +60,7 @@ uv run --project agent-service python evals/rca/run.py --check
 | Test | Proves |
 |---|---|
 | `GatewayApplicationTest.contextLoads` | Full context with no mocks (caught the missing RestClient starter) |
-| `IncidentControllerTest` (15) | 401 without a token; **tenant from the token, not the body**; payload equals the shared contract; reviewer = JWT subject; 403 without a tenant claim; agent 409 passthrough; validation; **agent outage → FAILED record**; decision recorded with the reviewer; list scoped to the tenant. Phase 7: **approval mints a capability bound to the proposed action/target/reviewer and passes it to the agent**; rejection and approved `escalate` mint nothing; execution audited with the capability's jti and verification result (and the alert link released); a failed remediation is audited and keeps the alert linked |
-| `RemediationTokensTest` (2) | ES256, gateway `iss`; capability claims (aud `sentinel-remediation`, scope, tenant, incident, action, target, approver, 5-minute expiry); a fresh jti per approval |
+| `IncidentControllerTest` (16) | 401 without a token; **tenant from the token, not the body**; payload equals the shared contract; reviewer = JWT subject; 403 without a tenant claim; agent 409 passthrough; validation; **agent outage → FAILED record**; decision recorded with the reviewer; list scoped to the tenant. Phase 11: **the decision is recorded in Sentinel Guard (on the agent's request, approver = JWT subject) before the agent resumes**; a rejection is recorded too; approved `escalate` touches the guard not at all; **a decision the guard refuses resumes nothing** (409 with the guard's reason); execution audited with the guard request, the capability's jti and the verification result (and the alert link released); a failed remediation is audited and keeps the alert linked |
 | `AlertServiceTest` (7) | New alert → incident dated at the alert's `startsAt`, tenant from the token (a `tenant_id` label is ignored), severity mapped, investigated in the background; re-fire → deduplicated; **a second rule on the same service joins the open incident without a new investigation**; missing/invalid `service` label skipped; resolution recorded; fingerprint fallback is a stable label hash |
 | `AlertSecurityTest` (9) | Real signed tokens: the gateway-issued integration token works on the webhook and its tenant is used; **an HS256-forged integration token → 401; a revoked one → 403**; anonymous → 401; **user token, a user token claiming `alerts:write` without the audience, and an agent tool token → 403**; the integration token can't read incidents or call `/mcp`; **a remediation capability is useless at the gateway** |
 | `ClosedLoopRepositoryIT` (9) | V6 on real Postgres as `sentinel_app`: **8 concurrent deliveries of one alert open exactly one incident (no spare records)**; **6 different rules tripping on one service concurrently share one incident**; other services and other tenants get their own; a finished incident releases the alert for a new one; the incident is reported resolved only when its *last* alert clears; a resolution arriving after the incident closed still reaches it (not older ones); timeline and time-to-mitigate mirrored; audit is tenant-scoped |
@@ -92,7 +91,7 @@ uv run --project agent-service python evals/rca/run.py --check
 | Test file | Proves |
 |---|---|
 | `test_incident_flow.py` (13) | Scripted investigation's tool sequence, rollback, grounded citations; runbooks cited only when they name the signature; the runbook query is built from symptoms; runbook text never triggers rules; **tool token used but never persisted**; works without a token; a failing tool is recorded and policy escalates; approval → execution → verification → postmortem; rejection; decisions single-use; duplicate open 409; tenants isolated; **after a rollback, a new DB-pool incident is not rolled back again** (live-run regression) |
-| `test_remediation.py` (8) | Approval executes with the capability and verifies: RESOLVED, ordered timeline, time-to-mitigate; no capability → nothing executes (REMEDIATION_FAILED); a refused capability (already used) → failure, not success; **a fix that doesn't heal is caught by verification** after the configured attempts; an action the adapter can't perform fails with a clear error; approved `escalate` → ESCALATED with no capability use; rejection executes nothing; **the capability is never checkpointed** |
+| `test_remediation.py` (12) | Approval executes with the capability and verifies: RESOLVED, ordered timeline, time-to-mitigate; no capability → nothing executes (REMEDIATION_FAILED); a refused capability (already used) → failure, not success; **a fix that doesn't heal is caught by verification** after the configured attempts; an action the adapter can't perform fails with a clear error; approved `escalate` → ESCALATED with no capability use and nothing registered; rejection executes nothing; **the capability is never checkpointed**. Phase 11 (`FakeGuard`, the guard API's contract): **the proposal is registered once, before approval, and not again on resume**; **a resume without an approval in the guard executes nothing**; guard down at execution → fails closed; guard down at proposal time → the proposal still shows, nothing can run; the approved parameters (`size: 40`) are part of the proposal |
 | `test_investigation_budget.py` (5) | Step cap (exactly 8 executed); cost cap (stops before the second batch); clean finish; hallucinated tool → error result; LLM outage → scripted plan |
 | `test_guardrails.py` (16) | PII kinds incl. a Luhn check; **metric floats never redacted**; injection removed and counted, ordinary ops text untouched; citations normalized/dropped; rollback window; uninvestigated target blocked; free-text target mapped; RCA schema enum; escalation always passes; **a rollback record or a rolled-back build doesn't justify another rollback**; "no recent deployments" doesn't satisfy the interlock; **runbook preconditions**: `increase_pool`/`restart`/`failover` blocked without their signal in the target's telemetry, allowed by a log signature or (logs down) a metric at the runbook/alert threshold, never by runbook text or another service's signal |
 | `test_heuristics.py` (7) | Deploy suspect window boundaries (5, 30, 31, 360, −5 minutes); old deploy → no rollback; unparseable time stays a suspect |
@@ -101,9 +100,9 @@ uv run --project agent-service python evals/rca/run.py --check
 | `test_tracing.py` (3) | One trace continuing the caller's trace id; node/tool spans; GenAI attributes; guardrail span events |
 | `test_contracts.py` (1) | The gateway's payload fixture parses and matches the model's fields exactly |
 | `test_auth.py` (8) | Gateway → agent: no token → 401; a token for the tenant → accepted; **another tenant's token → 403 in path and body**; tool-token audience, forged key, expired, and HS256 shared-secret tokens → 401; health and metrics open |
-| `test_postgres_checkpointer.py` (3) | Durability across processes (now with a capability, so it resolves); **checkpoint RLS**: a request bound to another tenant reads nothing and can't write (`InsufficientPrivilege`), an unbound request reads nothing; tables FORCE RLS even for their owner |
+| `test_postgres_checkpointer.py` (3) | Durability across processes (the approval lives in the guard, so it survives the restart too, and the incident resolves); **checkpoint RLS**: a request bound to another tenant reads nothing and can't write (`InsufficientPrivilege`), an unbound request reads nothing; tables FORCE RLS even for their owner |
 
-### sentinel-guard (32; `cd guard && go test -race ./...`)
+### sentinel-guard (34; `cd guard && go test -race ./...`)
 - **Engine** (`internal/guard/engine_test.go`):
   - an approval admits exactly once, a retry while pending reuses the request, a replay opens a new one;
   - the approval is bound to the exact change and target;
@@ -127,19 +126,21 @@ uv run --project agent-service python evals/rca/run.py --check
   - workloads webhook: humans pass; agents wait; dry run previews; approve, then admit and readmit; a replay after the window is denied; scale to zero is blocked; it fails closed on an unreadable object;
   - approvals webhook: agents, other agents, edits, invalid decisions, creates and deletes are refused; the approver is stamped from the authenticated user;
   - the action API end to end with JWKS;
+  - **delegated decisions** (Phase 11): a non-delegate can't decide; a delegate can't approve on behalf of the requesting agent; an approval via the gateway records `decidedBy` = the person and `decidedVia` = the delegate, in the audit too; the capability carries the scope and the approved parameters; with no admin token (Kubernetes), only delegates decide over HTTP;
+  - the plain-HTTP API listener serves no admission webhooks;
   - an ActionRequest's round trip through JSON keeps the audit valid.
 
 ### mcp-observability (12)
 Discovery over an MCP client session; log grouping; metric parsing; unknown service → tool error; invalid level; single-object wire shape; `probe_service` success rate and p95; **timeouts count as failures and requests are capped at 50**; unknown services rejected; **`/mcp` requires a gateway tool token** (none, wrong audience, missing `telemetry:read`, or a forged key → 401); health stays open.
 
-### mcp-remediation (14)
-The capability check (`tests/test_capabilities.py`):
-- an approved action executes once, and **the replay is refused without reaching the service**;
-- wrong action, wrong target, wrong audience, wrong scope, expired (5 cases) → refused before any ops call;
+### mcp-remediation (17)
+The capability check (`tests/test_capabilities.py`), against capabilities signed like Sentinel Guard's and a fake guard redemption endpoint (Phase 11):
+- an approved action executes once, and **the replay is refused at the guard without reaching the service**;
+- wrong action, wrong target, wrong audience (`sentinel-mcp`, and the old `sentinel-remediation`), expired, **a parameter that differs from the approved one** (size 60 vs 40), **a parameter never approved** (7 cases) → refused **before anything is redeemed** or any ops call;
 - a missing token or a forged signature (attacker EC key with the same `kid`) → refused;
-- **a capability forged with the old HS256 shared secret → refused** ("only ES256"), and one from another issuer → refused;
-- `dry_run` validates without executing **or consuming** the capability;
-- **replay store down → refused (fails closed)**;
+- **a capability forged with the old HS256 shared secret → refused** ("only ES256"), and one from another issuer (including the gateway) → refused;
+- `dry_run` validates without executing **or redeeming** the capability;
+- **the guard unreachable, or answering with an error → refused (fails closed)** (2 cases);
 - the pool size is bounded by the runbook; `scale_out` is bounded (≤ 10 replicas) and needs its own capability.
 
 ### Eval scorer and runner (14)

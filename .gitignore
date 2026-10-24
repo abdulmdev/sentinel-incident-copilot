@@ -31,3 +31,6 @@ frames/
 
 # private launch notes
 launch-drafts.md
+
+# Helm dependency builds
+deploy/helm/*/charts/

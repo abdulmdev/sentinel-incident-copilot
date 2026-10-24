@@ -149,11 +149,18 @@ Preconditions are checked by the guard against your telemetry. An agent's own ev
 | `POST /v1/actions` | agent | propose `{action, target, change, intent, dryRun}` → `200 allow` (with a capability) · `202 pending` · `403 block` |
 | `GET /v1/actions/{id}` | the requesting agent | status; once approved, the single-use capability (issued once) |
 | `POST /v1/capabilities/spend` | executor | verify and consume a capability atomically: `200`, or `409` if already used |
-| `POST /v1/actions/{id}/approve` · `/deny` | approver (single-process mode) | in Kubernetes, approve with `kubectl sentinel` instead |
+| `POST /v1/actions/{id}/approve` · `/deny` | the admin token (single-process mode) or a **delegate** | records `{approver, note}`; people in Kubernetes approve with `kubectl sentinel` |
 | `GET /v1/audit/verify` | approver | verify the audit chain |
 | `GET /.well-known/jwks.json` | anyone | the guard's public key (capabilities are ES256 JWTs) |
 
-In Kubernetes, agents authenticate with their ServiceAccount token (verified with a TokenReview); approvals are Kubernetes objects, so they follow your RBAC. A capability binds the request, action, target, change fingerprint and approver, and expires with the approval.
+In Kubernetes, agents authenticate with their ServiceAccount token (verified with a TokenReview); approvals are Kubernetes objects, so they follow your RBAC. A capability binds the request, action, target, the approved parameters (`change`) and approver, and expires with the approval.
+
+**Approving from your own app (delegates).** If your product already signs people in (a console, a chat bot), it can record their decisions over HTTP as a *delegate*:
+- list its identity under `delegates` in the chart values;
+- call `POST /v1/actions/{id}/approve` with its own token and `{"approver": "alice@example.com"}`;
+- the guard records Alice as the approver, via your app, so the trust is visible in the audit. Your app can never approve on behalf of the agent that asked.
+
+Sentinel's incident console works this way. With `api.plainHTTP: true` the guard also serves this API inside the cluster over plain HTTP (no webhooks on that port).
 
 ## How it works
 - **Classification.** The webhook turns an admission request into an action and a *fingerprint* of the exact change (`replicas=3`, the new images, a digest of the new template). The approval is bound to agent + action + target + fingerprint.

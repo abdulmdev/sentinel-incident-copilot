@@ -66,6 +66,10 @@ sentinel:
       enabled: ${SENTINEL_DEV_TOKENS:false}                      # HS256 dev user tokens: never in production
       secret: ${SENTINEL_JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
   agent-url: ${SENTINEL_AGENT_URL:http://localhost:8000}
+  guard:                                                         # Sentinel Guard: reviewers' decisions are recorded there
+    url: ${SENTINEL_GUARD_URL:http://localhost:8400}
+    token: ${SENTINEL_GUARD_TOKEN:}                              # static delegate token (single-process guard)
+    token-file: ${SENTINEL_GUARD_TOKEN_FILE:}                    # projected ServiceAccount token (Kubernetes)
   requests-per-minute: 120
   rate-limit:
     backend: ${SENTINEL_RATE_LIMIT_BACKEND:redis}

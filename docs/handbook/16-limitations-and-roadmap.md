@@ -31,8 +31,10 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 | Guard | The chain head is one ConfigMap: every event is serialized through it, and `voids` grows with lost races | Throughput suits human approvals, not a high-volume event log; voids accumulate slowly | Segment the chain per period with signed checkpoints; compact voids into the export |
 | Guard | Signing key and TLS cert in Kubernetes Secrets; rotating the key drops the old public key | Events signed with an old key can't be verified after rotation | Keep a key history in the JWKS ConfigMap; optional KMS signing |
 | Guard | Only the configured operations are guarded (workload updates and deletes, deletes of common objects); `exec`, `port-forward`, CRDs from other operators and RBAC changes are not, by default | An agent with broad RBAC can still act through unguarded paths | Grow the default rules; pair with least-privilege RBAC for agent ServiceAccounts; Kyverno/Gatekeeper packs |
-| Guard | The incident copilot (v1) still mints its own capabilities | Two approval paths in one repo | Move `IncidentService.decide` and the remediation adapter onto the guard's API (the next v2 step) |
-| Guard | Approvals only via `kubectl sentinel` / the API; no Slack or console UI; single-process mode keeps state in memory | Approvers must use the terminal | Slack interactive approvals; a console page; a durable single-process store |
+| Guard | The guard trusts the gateway's word for who the console reviewer is (a delegate, as v1 trusted the gateway to mint) | A compromised gateway could record approvals in a reviewer's name (visible in the signed audit as "via" the gateway) | Forward the reviewer's own OIDC token and verify it at the guard (issuer, audience, tenant) |
+| Guard | The chart's agent and delegate identities are static values assuming release and namespace `sentinel` | A different install silently loses separation of duties until the values are fixed | Derive them from the release in templates (needs the subchart to accept templated values) |
+| Guard | The local (single-process) guard keeps requests in memory | A dev restart loses pending approvals; those incidents must be re-opened | A durable single-process store |
+| Guard | Approvals for generic agents only via `kubectl sentinel` / the API (the copilot's go through its console since Phase 11); no Slack | Approvers of other agents must use the terminal | Slack interactive approvals; a guard page in the console |
 
 ## 2. Roadmap (proposed order)
 
@@ -40,7 +42,7 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 
 *Figure 16.1: Roadmap items by impact and effort*
 
-0. **Sentinel Guard, next** (v2): move the incident copilot onto the guard; SDKs and an MCP proxy for agents outside Kubernetes; retention with signed export; Slack approvals; Kyverno/Gatekeeper packs; the SafeActionBench benchmark.
+0. **Sentinel Guard, next** (v2): SDKs and an MCP proxy for agents outside Kubernetes; verify the reviewer's OIDC token at the guard; retention with signed export; Slack approvals; Kyverno/Gatekeeper packs; the SafeActionBench benchmark.
 1. **Claude column** (needs an API key); improve the local model's accuracy on red-herring and injection tiers (currently 33–38%: safe, but escalated).
 2. **Real-world benchmark data:** record chaos-lab incidents; import anonymized postmortems.
 3. **Identity, next:** KMS-backed signing; mTLS/SPIFFE between pods; egress NetworkPolicies.
@@ -50,3 +52,4 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 *Done in Phase 7 (removed from this list):* alert webhooks, and remediation execution behind interlocks with capability tokens, verification and audit.
 *Done (Phase 8):* pushed to GitHub with CI green and images published.
 *Done in Phase 8:* OIDC users, asymmetric (ES256) service tokens with a JWKS, gateway ↔ agent service identity, checkpoint RLS, revocable integration tokens.
+*Done in Phase 11:* the incident copilot runs on Sentinel Guard (one approval and capability path).

@@ -77,6 +77,8 @@ services:
       SENTINEL_OIDC_ISSUER: http://localhost:8180/realms/sentinel
       SENTINEL_OIDC_JWKS_URI: http://keycloak:8080/realms/sentinel/protocol/openid-connect/certs
       SENTINEL_AGENT_URL: http://agent:8000
+      SENTINEL_GUARD_URL: http://guard:8400             # reviewers' decisions are recorded there
+      SENTINEL_GUARD_TOKEN: ${SENTINEL_GUARD_GATEWAY_TOKEN:-dev-guard-gateway-token}
     volumes:
       - onnx-cache:/tmp
     ports: ["8080:8080"]
@@ -95,6 +97,8 @@ services:
       SENTINEL_MCP_KNOWLEDGE_URL: http://gateway:8080/mcp
       SENTINEL_MCP_REMEDIATION_URL: http://mcp-remediation:8300/mcp
       SENTINEL_ISSUER: http://gateway:8080              # verifies the gateway's per-call tokens (JWKS)
+      SENTINEL_GUARD_URL: http://guard:8400             # proposals and capabilities
+      SENTINEL_GUARD_TOKEN: ${SENTINEL_GUARD_AGENT_TOKEN:-dev-guard-agent-token}
     ports: ["8000:8000"]
     depends_on:
       ingestion: { condition: service_started }   # Flyway creates the checkpoint schema
@@ -108,15 +112,29 @@ services:
       SENTINEL_ISSUER: http://gateway:8080              # tool tokens required on /mcp
     ports: ["8200:8200"]
 
-  # Deploy-tool adapter: executes an approved remediation, once, with the capability minted at approval.
+  # Sentinel Guard (single process): the agent registers each proposal, the gateway records reviewers'
+  # decisions as a delegate, and the guard issues the single-use capability the adapter redeems.
+  guard:
+    build: ../guard
+    environment:
+      SENTINEL_GUARD_MODE: memory
+      SENTINEL_GUARD_ADDR: ":8400"
+      SENTINEL_GUARD_POLICY: /etc/sentinel-guard/policy.yaml
+      SENTINEL_GUARD_AGENT_TOKENS: sentinel-agent=${SENTINEL_GUARD_AGENT_TOKEN:-dev-guard-agent-token}
+      SENTINEL_GUARD_DELEGATE_TOKENS: sentinel-gateway=${SENTINEL_GUARD_GATEWAY_TOKEN:-dev-guard-gateway-token}
+      SENTINEL_GUARD_ADMIN_TOKEN: ${SENTINEL_GUARD_ADMIN_TOKEN:-dev-guard-admin-token}
+    volumes:
+      - ./guard/copilot-policy.yaml:/etc/sentinel-guard/policy.yaml:ro
+    ports: ["8400:8400"]
+
+  # Deploy-tool adapter: executes an approved remediation, once, with the capability the guard issued.
   mcp-remediation:
     build: ../mcp-tools/remediation
     environment:
       OPS_SERVICES: checkout=http://checkout:8000,inventory=http://inventory:8000
-      SENTINEL_ISSUER: http://gateway:8080          # verifies capabilities with the gateway's public keys (no secret)
-      SENTINEL_REPLAY_STORE: redis://redis:6379/0   # single-use capabilities; fails closed if Redis is down
+      SENTINEL_GUARD_URL: http://guard:8400         # verifies capabilities with the guard's public key, redeems them there
     ports: ["8300:8300"]
-    depends_on: [redis]
+    depends_on: [guard]
 
   # --- chaos-lab: demo microservices that we deliberately break ---
   checkout:

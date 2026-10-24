@@ -11,7 +11,8 @@ data:
   SENTINEL_AGENT_URL: "http://{{ .Release.Name }}-agent:8000"
   SENTINEL_MCP_OBSERVABILITY_URL: "http://{{ .Release.Name }}-mcp-observability:8200/mcp"
   SENTINEL_MCP_REMEDIATION_URL: "http://{{ .Release.Name }}-mcp-remediation:8300/mcp"
-  SENTINEL_REPLAY_STORE: "redis://{{ .Values.redis.host }}:6379/0"   # single-use capabilities (fails closed)
+  # Sentinel Guard (subchart): proposals, reviewers' decisions, capability redemption. Plain HTTP in-cluster.
+  SENTINEL_GUARD_URL: "http://sentinel-guard:{{ index .Values "sentinel-guard" "api" "port" }}"
   SENTINEL_MCP_KNOWLEDGE_URL: "http://{{ .Release.Name }}-gateway:8080/mcp"
   GATEWAY_URL: "http://{{ .Release.Name }}-gateway:8080"
   # Identity: service tokens are ES256 from the gateway; everyone verifies them via its JWKS.

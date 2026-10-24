@@ -19,10 +19,10 @@ Infra in Docker; services as host processes; no image builds.
 |---|---|
 | 1 | Download the embedding model once to `.models/all-MiniLM-L6-v2/model.onnx`; export `SENTINEL_EMBEDDING_MODEL_URI=file:…` |
 | 2 | `docker compose up -d --wait postgres kafka redis jaeger keycloak` (Keycloak imports the dev realm `deploy/keycloak/sentinel-realm.json`; :8180) |
-| 3 | `mvn package` gateway and ingestion |
-| 4 | Start chaos-lab inventory :8102, checkout :8101 (→ inventory), mcp-observability :8200, **mcp-remediation :8300** (`OPS_SERVICES`, replay store `redis://localhost:6379/0`), **loadgen** (→ checkout) |
+| 3 | Build Sentinel Guard (`go build`, the toolchain in `.tools/go` or `go` on the PATH); `mvn package` gateway and ingestion |
+| 4 | Start **Sentinel Guard :8400** (memory mode, `deploy/guard/copilot-policy.yaml`, dev-only tokens for the agent and the gateway as a delegate; metrics :9095), chaos-lab inventory :8102, checkout :8101 (→ inventory), mcp-observability :8200, **mcp-remediation :8300** (`OPS_SERVICES`, `SENTINEL_GUARD_URL`), **loadgen** (→ checkout) |
 | 5 | Start ingestion :8090 (runs Flyway); wait for health |
-| 6 | Start the agent :8000 with the Postgres checkpointer and MCP URLs (including `SENTINEL_MCP_REMEDIATION_URL`) |
+| 6 | Start the agent :8000 with the Postgres checkpointer, MCP URLs (including `SENTINEL_MCP_REMEDIATION_URL`) and `SENTINEL_GUARD_URL`/`SENTINEL_GUARD_TOKEN` |
 | 7 | Start the gateway :8080 (dev tokens on, OIDC issuer = local Keycloak, ephemeral signing key). Then Prometheus (with `alerts.yml`), **Alertmanager** and Grafana via `docker-compose.local-observability.yml`. They start after the gateway because the one-shot `alertmanager-token` container asks the gateway's API for the integration token (`SENTINEL_ALERT_TENANT`, default `acme`). Then the console :3000 if `web/node_modules` exists (OIDC + dev login) |
 
 Logs go to `.logs/<service>.log`. Every health wait times out after 120 tries with a 2 s curl timeout. The LLM provider comes from your shell (`SENTINEL_LLM_PROVIDER=ollama scripts/dev-local.sh up`). `down` stops local processes but leaves Docker infra running (`cd deploy && docker compose stop`).
@@ -187,7 +187,12 @@ Pod template invariants:
 | `SENTINEL_MCP_REMEDIATION_URL` | agent | `http://localhost:8300/mcp` | Remediation adapter (Phase 7) |
 | `SENTINEL_VERIFY_ATTEMPTS`, `SENTINEL_VERIFY_INTERVAL_S` | agent | 6, 5 | Post-execution probes; worst case must stay under the gateway's 120 s agent read timeout |
 | `OPS_SERVICES` | mcp-remediation | — | `name=ops-url,…`; unknown services are refused |
-| `SENTINEL_REPLAY_STORE` | mcp-remediation | `redis://localhost:6379/0` | Used-capability store; `memory` for tests only (not shared across replicas). Unreachable → executions refused |
+| `SENTINEL_GUARD_URL` | agent, gateway, mcp-remediation | `http://localhost:8400` (gateway, adapter); unset = no guard (agent: nothing can execute) | Sentinel Guard's action API (Phase 11). In Kubernetes: `http://sentinel-guard:8080`, the guard's in-cluster plain-HTTP port |
+| `SENTINEL_GUARD_TOKEN`, `SENTINEL_GUARD_TOKEN_FILE` | agent (proposes), gateway (decides as a delegate) | — | Identity towards the guard: a static token (single-process guard) or a projected ServiceAccount token file (Kubernetes; re-read on every call) |
+| `SENTINEL_GUARD_ISSUER` | mcp-remediation (also the guard itself) | `sentinel-guard` | `iss` of capabilities; the adapter verifies them against `<SENTINEL_GUARD_URL>/.well-known/jwks.json` |
+| `SENTINEL_GUARD_DELEGATE_TOKENS` | sentinel-guard (memory mode) | — | `name=token,…`: services allowed to record decisions on a person's behalf (added to the policy's `delegates`) |
+| `SENTINEL_GUARD_API_ADDR` | sentinel-guard (kubernetes mode) | — (off) | Also serve the action API (no webhooks) over plain HTTP, e.g. `:8080`, for in-cluster clients |
+| `SENTINEL_GUARD_AGENT_TOKEN`, `SENTINEL_GUARD_GATEWAY_TOKEN` | `deploy/docker-compose.yml` | dev-only values | The two static tokens compose gives the guard, the agent and the gateway |
 | `PROBE_TIMEOUT_S` | mcp-observability | 3 | Per-request cap in `probe_service` |
 | `LOADGEN_TARGETS`, `LOADGEN_INTERVAL_S` | chaos-lab loadgen | `http://localhost:8101`, 0.2 | Background traffic so faults reach the metrics |
 | `SENTINEL_ALERT_TENANT` | compose `alertmanager-token` | `acme` | Tenant for which the provisioner asks the gateway to issue Alertmanager's integration token |
@@ -229,6 +234,8 @@ Pod template invariants:
 | Symptom | Cause | Fix |
 |---|---|---|
 | Gateway won't start: "No qualifying bean of type RestClient.Builder" | Boot 4 modularized auto-config | `spring-boot-starter-restclient` |
+| `dev-local.sh up` hangs; `.logs/ingestion.log` says port 8090 is in use (Phase 11) | The local guard was first put on :8090, ingestion's port | The guard runs on **:8400** locally (compose too) |
+| Approve in the console → 503 "Sentinel Guard: unavailable, so nothing was approved or resumed" | The guard is down (by design nothing resumes) | Start the guard; in single-process (dev) mode pending requests are lost on restart, so re-open the incident |
 | Gateway → agent calls 422 / "Unsupported upgrade request" | JDK HttpClient tries an h2c upgrade | `AgentClient` forces HTTP/1.1 |
 | Ingestion: "No qualifying bean of type JsonMapper" | Boot 4 needs a Jackson starter | `spring-boot-starter-jackson` |
 | Startup hangs on "Failed to cache the resource … model.onnx" | Slow or blocked Hugging Face download | Use `.models/` (dev-local) or baked images; `SENTINEL_EMBEDDING_MODEL_URI=file:…` |
@@ -282,6 +289,8 @@ Install: `helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-gu
 | `policy` | see `values.yaml` | The policy (chapter 17 §2; user guide "Policy"); a change rolls the pods (checksum annotation) |
 | `replicas` | 3 | Spread across zones and nodes (topology spread), `maxUnavailable: 1` PDB |
 | `webhook.timeoutSeconds`, `webhook.guardCreate`, `webhook.extraRules` | 5, false, `[]` | Webhook timeout; also guard agents' creates; more resources to guard |
+| `delegates.users`, `delegates.groups` | `[]` | Services that may record a decision on a person's behalf over HTTP (Phase 11; the sentinel chart lists its gateway) |
+| `api.plainHTTP`, `api.port` | false, 8080 | Also serve the action API in-cluster over plain HTTP (no webhooks) |
 | `createNamespace` | false | Render the Namespace (used for `install.yaml`) |
 | `networkPolicy.enabled`, `serviceMonitor.enabled` | false, false | Optional extras |
 | `image.repository`, `image.tag` | `ghcr.io/abdulmdev/sentinel-guard`, the chart's appVersion | |
@@ -292,4 +301,18 @@ Install: `helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-gu
 - **Break-glass:** `kubectl delete validatingwebhookconfiguration sentinel-guard` stops enforcement (re-apply the chart to restore). The deletion is in the Kubernetes audit log.
 - **Rotate the TLS certificate or signing key:** delete the Secret (`sentinel-guard-tls` / `sentinel-guard-signing`) and restart the pods. A new signing key invalidates outstanding capabilities and starts a new key id; events signed with the old key verify only while its public key is still published (key history is on the roadmap, chapter 16).
 - **Release:** pushing a `v2.*` tag runs `.github/workflows/release-guard.yml`: signed multi-arch image with SBOM and provenance, OCI chart, `install.yaml`, the plugin for 5 platforms, the krew manifest. Afterwards, commit the release's `sentinel.yaml` as `plugins/sentinel.yaml`: that directory makes this repository a krew index (`kubectl krew index add sentinel <repo>.git`). First release: `v2.0.0-alpha.1` (2026-10-23); the image and chart pull anonymously from GHCR.
+
+### 8.4 The copilot on the guard (Phase 11)
+The `sentinel` chart depends on `sentinel-guard` (`deploy/helm/sentinel/Chart.yaml`, `file://../sentinel-guard`; `helm dependency build` first, which `kind-up.sh` and CI do). The `sentinel-guard:` block in `values.yaml`:
+- **`api.plainHTTP: true`** (port 8080).
+- **`agents.users`** includes `system:serviceaccount:sentinel:sentinel-agent` and **`delegates.users`** `system:serviceaccount:sentinel:sentinel-gateway`. These assume the release and namespace `sentinel`; change both if you install elsewhere.
+- **The policy:** the copilot's actions, `pendingTTL: 72h` (incidents can wait), `approvalTTL: 10m`.
+
+Components with **`guardIdentity: true`** (agent, gateway) get:
+- their own ServiceAccount, with `automountServiceAccountToken: false`;
+- a projected token at `/var/run/sentinel/guard/token` (1 h, rotated) and `SENTINEL_GUARD_TOKEN_FILE`.
+
+**NetworkPolicy `sentinel-allow-guard`:** port 8443 (webhooks) is open, and port 8080 accepts only the agent, the gateway and the remediation adapter.
+
+**kind** (`values-kind.yaml`) uses the locally built `sentinel/guard:dev` image with 1 replica.
 

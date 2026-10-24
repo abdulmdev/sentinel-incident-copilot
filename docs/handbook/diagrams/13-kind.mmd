@@ -5,6 +5,10 @@ flowchart TB
     subgraph rel1["Helm release: sentinel"]
       WEB[web] --> GW[gateway] --> AG[agent] --> MO[mcp-observability] --> CK[checkout] --> INV[inventory]
       AG -->|capability| MR[mcp-remediation] --> CK
+      SG["sentinel-guard (subchart)<br/>webhooks :8443 · API :8080"]
+      AG -->|propose · collect| SG
+      GW -->|decision as delegate| SG
+      MR -->|redeem| SG
       ING[ingestion]
       JOB["migrate Job<br/>(pre-install hook)"]
     end
@@ -16,6 +20,6 @@ flowchart TB
     NP --> WEB & GW
     GW & ING & AG & JOB --> PG
     GW & ING --> KF
-    GW & MR --> RD
+    GW --> RD
   end
-  NPOL["NetworkPolicy: default deny + allow-list<br/>web→gateway ✓ · web→agent ✗ · web→mcp ✗ · web→remediation ✗<br/>agent→remediation ✓ · remediation→chaos-lab ✓"] -.- rel1
+  NPOL["NetworkPolicy: default deny + allow-list<br/>web→gateway ✓ · web→agent ✗ · web→mcp ✗ · web→remediation ✗<br/>agent→remediation ✓ · remediation→chaos-lab ✓<br/>agent, gateway, remediation→guard API ✓"] -.- rel1

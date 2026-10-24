@@ -17,4 +17,5 @@ docker build -q -t sentinel/mcp-observability:$TAG mcp-tools/observability
 docker build -q -t sentinel/mcp-remediation:$TAG mcp-tools/remediation
 docker build -q -t sentinel/chaos-lab:$TAG chaos-lab/service
 docker build -q -t sentinel/web:$TAG web
+docker build -q -t sentinel/guard:$TAG guard
 docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' | grep "^sentinel/.*:$TAG"

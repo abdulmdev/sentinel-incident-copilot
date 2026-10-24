@@ -1,11 +1,13 @@
 """Incident workflow as a LangGraph state machine.
 
-    investigator ⇄ tools ──▶ triage ──▶ rca ──▶ approval (human interrupt) ──▶ postmortem
+    investigator ⇄ tools ──▶ triage ──▶ rca ──▶ request_approval ──▶ approval (human interrupt)
+        ──▶ execute ──▶ verify ──▶ postmortem
 
 The investigator decides which MCP tools to call, sees the results and decides what to
 look at next, until it has enough evidence or hits its budget. Every step is checkpointed,
 so with the Postgres checkpointer an incident survives a pod restart mid-investigation and
-can wait days for approval. No remediation runs until a human resumes the graph.
+can wait days for approval. No remediation runs until a human resumes the graph, and then only
+with the single-use capability Sentinel Guard issues for exactly the approved action.
 
 Budgets are enforced by the graph, not by asking the model nicely:
 - MAX_TOOL_CALLS caps tool executions; calls beyond it are answered "skipped".
@@ -14,6 +16,7 @@ Budgets are enforced by the graph, not by asking the model nicely:
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import json
 import logging
@@ -28,6 +31,7 @@ from langgraph.types import interrupt
 from . import evidence as ev
 from . import guardrails, heuristics, llm
 from .models import Budget, Evidence, Incident, IncidentState, RcaResult, Triage
+from .guard_client import GuardClient
 from .telemetry import record_llm_call, tracer
 from .toolbox import ToolBox, output_text
 
@@ -133,7 +137,21 @@ def scripted_step(incident: Incident, state: IncidentState, tool_names: set[str]
                                              for i, (n, a) in enumerate(calls)])
 
 
-def build_graph(toolbox: ToolBox, checkpointer):
+def _params(rem: dict) -> dict:
+    """The adapter arguments beyond the service; the guard binds the approval to them."""
+    return {"increase_pool": {"size": 40}, "scale_out": {"replicas": 4}}.get(rem["action"], {})
+
+
+def _jti(token: str) -> str | None:
+    """The capability's id, for the audit trail (the adapter verifies the token; we only read it)."""
+    try:
+        payload = token.split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))).get("jti")
+    except Exception:
+        return None
+
+
+def build_graph(toolbox: ToolBox, checkpointer, guard: GuardClient | None = None):
     async def investigator(state: IncidentState, config: RunnableConfig) -> IncidentState:
         incident = Incident(**state["incident"])
         budget = dict(state.get("budget") or _new_budget())
@@ -253,6 +271,25 @@ def build_graph(toolbox: ToolBox, checkpointer):
                 "guardrail_events": cite_events + policy_events,
                 "timeline": {**state.get("timeline", {}), "proposed_at": _now()}}
 
+    async def request_approval(state: IncidentState) -> IncidentState:
+        """Registers the proposed action with Sentinel Guard, once, before the human is asked.
+
+        Its own node (not part of `approval`): LangGraph re-runs an interrupted node from the top on
+        resume, and the proposal must not be sent again after the approval.
+        """
+        rem, inc = state["rca"]["remediation"], state["incident"]
+        if rem["action"] == "escalate":
+            return {"approval": {"request": None, "message": "escalation: nothing to execute"}}
+        if guard is None:
+            return {"approval": {"request": None, "error": "Sentinel Guard is not configured: nothing can execute"}}
+        try:
+            out = await guard.propose(rem["action"], inc["tenant_id"], rem["target"],
+                                      {"incident": inc["id"], **_params(rem)}, rem.get("reason", ""))
+        except Exception as e:  # the guard is down: the proposal stands, but nothing can run until it's back
+            return {"approval": {"request": None, "error": f"{type(e).__name__}: {e}"[:300]}}
+        req = out.get("request") or {}
+        return {"approval": {"request": req.get("id"), "verdict": out["verdict"], "message": out.get("message", "")}}
+
     def approval(state: IncidentState) -> IncidentState:
         decision = interrupt({"proposed": state["rca"]["remediation"]})
         action = state["rca"]["remediation"]["action"]
@@ -268,16 +305,28 @@ def build_graph(toolbox: ToolBox, checkpointer):
     async def execute(state: IncidentState, config: RunnableConfig) -> IncidentState:
         """Runs exactly the approved action through the remediation MCP server.
 
-        Authorization is the single-use capability the gateway minted at approval (bound to this
-        incident, action and target). It arrives in config, never in state, so it's never checkpointed.
+        Authorization is the single-use capability Sentinel Guard issues once the human's approval is
+        recorded there (bound to this incident, action, target and parameters). It is fetched here and
+        passed straight to the adapter: never in state, so never checkpointed.
         """
         rem = state["rca"]["remediation"]
-        capability = (config.get("configurable") or {}).get("remediation_token")
+        request = (state.get("approval") or {}).get("request")
         timeline = {**state.get("timeline", {}), "executed_at": _now()}
-        if not capability:
-            return {"execution": {"executed": False, "error": "no capability token for this action"},
+
+        def failed(error: str) -> IncidentState:
+            return {"execution": {"executed": False, "error": error[:500], "guard_request": request},
                     "status": "REMEDIATION_FAILED", "timeline": timeline}
-        args = {"service": rem["target"], **({"size": 40} if rem["action"] == "increase_pool" else {})}
+
+        if guard is None or not request:
+            return failed((state.get("approval") or {}).get("error") or "no approval request in Sentinel Guard")
+        try:
+            out = await guard.capability(request)
+        except Exception as e:
+            return failed(f"Sentinel Guard unavailable, refusing to execute: {type(e).__name__}: {e}")
+        capability = out.get("capability")
+        if out.get("verdict") != "allow" or not capability:
+            return failed(f"no capability: {out.get('message', out.get('verdict'))}")
+        args = {"service": rem["target"], **_params(rem)}
         try:
             tools = {t.name: t for t in await toolbox.remediation_tools(capability)}
             if rem["action"] not in tools:
@@ -291,9 +340,9 @@ def build_graph(toolbox: ToolBox, checkpointer):
             result, text = None, f"{type(e).__name__}: {e}"
         if not result or not result.get("executed"):
             # The MCP adapter returns tool errors as text: anything that isn't a clean execution is a failure.
-            return {"execution": {"executed": False, "error": text[:500]}, "status": "REMEDIATION_FAILED",
-                    "timeline": timeline}
-        return {"execution": result, "timeline": timeline}
+            return failed(text)
+        return {"execution": {**result, "guard_request": request, "capability_jti": _jti(capability)},
+                "timeline": timeline}
 
     async def verify(state: IncidentState, config: RunnableConfig) -> IncidentState:
         """Probes the service until it's healthy (success ≥ 95%, p95 < 1 s) or attempts run out."""
@@ -391,6 +440,7 @@ def build_graph(toolbox: ToolBox, checkpointer):
     g.add_node("tools", _traced("tools", run_tools))
     g.add_node("triage", _traced("triage", triage))
     g.add_node("rca", _traced("rca", rca))
+    g.add_node("request_approval", _traced("request_approval", request_approval))
     g.add_node("approval", approval)  # interrupt() raises by design; not an error span
     g.add_node("execute", _traced("execute", execute))
     g.add_node("verify", _traced("verify", verify))
@@ -399,7 +449,8 @@ def build_graph(toolbox: ToolBox, checkpointer):
     g.add_conditional_edges("investigator", after_investigator, ["tools", "triage"])
     g.add_conditional_edges("tools", after_tools, ["investigator", "triage"])
     g.add_edge("triage", "rca")
-    g.add_edge("rca", "approval")
+    g.add_edge("rca", "request_approval")
+    g.add_edge("request_approval", "approval")
     g.add_conditional_edges("approval", after_approval, ["execute", "postmortem"])
     g.add_conditional_edges("execute", after_execute, ["verify", "postmortem"])
     g.add_edge("verify", "postmortem")
@@ -429,10 +480,8 @@ def _traced(name: str, fn):
     return node
 
 
-def run_config(tenant_id: str, incident_id: str, tool_token: str | None = None,
-               remediation_token: str | None = None) -> RunnableConfig:
+def run_config(tenant_id: str, incident_id: str, tool_token: str | None = None) -> RunnableConfig:
     # Tenant is part of the thread key, so one tenant can never resume another tenant's incident.
     # Tokens live in `configurable`, which is never written to the checkpoint.
-    return {"configurable": {"thread_id": f"{tenant_id}:{incident_id}", "tool_token": tool_token,
-                             "remediation_token": remediation_token},
+    return {"configurable": {"thread_id": f"{tenant_id}:{incident_id}", "tool_token": tool_token},
             "recursion_limit": 2 * MAX_TOOL_CALLS + 16}

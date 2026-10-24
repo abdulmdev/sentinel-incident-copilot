@@ -11,11 +11,14 @@ flowchart LR
   subgraph host["Host processes (scripts/dev-local.sh)"]
     WEB[web :3000] --> GW[gateway :8080] --> AG[agent :8000] --> MO[mcp-observability :8200] --> CK[checkout :8101] --> INV[inventory :8102]
     AG --> MR[mcp-remediation :8300] --> CK
+    SG[sentinel-guard :8400<br/>memory mode]
+    AG -->|propose · collect capability| SG
+    GW -->|reviewer's decision| SG
+    MR -->|redeem once| SG
     LG[loadgen] --> CK
     ING[ingestion :8090]
   end
   GW --> PG & KF & RD
-  MR --> RD
   ING --> PG & KF
   AG --> PG
   GW & AG & MO -.traces.-> JG

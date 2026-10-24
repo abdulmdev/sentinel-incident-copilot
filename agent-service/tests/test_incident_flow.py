@@ -6,7 +6,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 import app.main as main
 from app.graph import build_graph
 
-from .fakes import BAD_DEPLOY, FakeToolBox
+from .fakes import BAD_DEPLOY, FakeGuard, FakeToolBox
 
 TOKEN = "scoped-tool-token-abc"
 
@@ -17,9 +17,14 @@ def toolbox():
 
 
 @pytest.fixture
-def client(monkeypatch, toolbox):
+def guard():
+    return FakeGuard()
+
+
+@pytest.fixture
+def client(monkeypatch, toolbox, guard):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    main.app.state.graph = build_graph(toolbox, InMemorySaver())
+    main.app.state.graph = build_graph(toolbox, InMemorySaver(), guard)
     return TestClient(main.app)  # no lifespan: we inject the graph
 
 
@@ -99,12 +104,12 @@ def test_failing_tool_is_recorded_and_investigation_continues(client, toolbox):
     assert override["from"] == "rollback" and "no deploy" in override["reason"]
 
 
-def test_approval_resumes_graph_and_writes_postmortem(client, monkeypatch):
+def test_approval_resumes_graph_and_writes_postmortem(client, guard, monkeypatch):
     monkeypatch.setattr("app.graph.VERIFY_INTERVAL_S", 0)
     open_incident(client)
+    guard.approve()
     body = client.post("/tenants/acme/incidents/inc-1/decision",
-                       json={"approved": True, "reviewer": "oncall@acme"},
-                       headers={"X-Sentinel-Remediation-Token": "capability-1"}).json()
+                       json={"approved": True, "reviewer": "oncall@acme"}).json()
     assert body["status"] == "RESOLVED"
     assert "`rollback` on `checkout`" in body["postmortem"]
     assert "approved by oncall@acme" in body["postmortem"]

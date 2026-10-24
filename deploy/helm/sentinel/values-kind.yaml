@@ -15,6 +15,9 @@ chaosLab: { enabled: true }
 # signing key (one gateway replica). Service tokens are still ES256 and verified via the JWKS.
 auth: { devTokens: true, signing: { requireConfigured: false } }
 networkPolicy: { externalAccess: [web, gateway] }   # NodePorts on the host; everything else stays internal
+sentinel-guard:
+  image: { repository: sentinel/guard, tag: dev, pullPolicy: Never }
+  replicas: 1
 components:
   gateway:
     secrets: [jwtSecret, dbAppPassword, anthropicApiKey]   # dev issuer; ephemeral signing key

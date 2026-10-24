@@ -41,7 +41,7 @@
 ```json
 {"approved":true,"note":"optional, ≤1000 chars"}
 ```
-The reviewer is the JWT `sub`, never taken from the body. On approval of an executable action, the gateway mints a capability for the **proposed** action and target (read from the agent, not the request) and passes it to the agent, which executes and verifies. The call is synchronous: up to about a minute when verification needs retries.
+The reviewer is the JWT `sub`, never taken from the body. The gateway first records the decision in **Sentinel Guard** on the request the agent registered for the **proposed** action (read from the agent, not the request; [ADR-0011](../adr/0011-copilot-approvals-through-the-guard.md)). Then it resumes the agent, which collects its single-use capability from the guard, executes and verifies. If the guard refuses (expired, already decided: **409**; unreachable: **503**), nothing is resumed and `detail` starts "Sentinel Guard: …". The call is synchronous: up to about a minute when verification needs retries.
 
 | Response | When |
 |---|---|
@@ -135,7 +135,7 @@ Body, pinned by `contracts/agent-open-incident.request.json` and tested on **bot
 ```json
 {"approved":true,"reviewer":"alice@acme","note":null}
 ```
-Optional headers `X-Sentinel-Remediation-Token: <capability>` (execution) and `X-Sentinel-Tool-Token` (verification probes); config-only, never checkpointed. **200** · **404** · **409** if not `AWAITING_APPROVAL`.
+Optional header `X-Sentinel-Tool-Token` (verification probes); config-only, never checkpointed. No capability travels here (Phase 11): the agent collects it from Sentinel Guard. **200** · **404** · **409** if not `AWAITING_APPROVAL`.
 
 ### 3.4 The incident view (all agent responses)
 ```json
@@ -152,8 +152,11 @@ Optional headers `X-Sentinel-Remediation-Token: <capability>` (execution) and `X
   },
   "llm_calls": [{"step":"rca","model":"…","latency_ms":1200,"input_tokens":…,"output_tokens":…,"cost_usd":…}],
   "guardrail_events": [{"type":"action_overridden","from":"rollback","target":"checkout","reason":"…"}],
+  "approval": {"request":"ar-11c9451b-1","verdict":"pending","message":"Sentinel Guard: rollback of checkout needs human approval (request ar-11c9451b-1)."},
+                                                                         // Phase 11: the guard request; {request:null, error} if the guard was down
   "decision": {"approved":true,"reviewer":"alice@acme","note":null},   // after decision
   "execution": {"executed":true,"dry_run":false,"action":"rollback","service":"checkout","incident_id":"…",
+                "guard_request":"ar-11c9451b-1","capability_jti":"cap-39a0d2ac02c8b85c",
                 "result":{"operation":"rollback","fixed_active_fault":true,"from_version":"1.5.0","to_version":"1.4.2"}},
   "verification": {"healthy":true,"attempts":[{"service":"checkout","requests":20,"ok":20,"errors":0,
                                                 "success_rate":1.0,"p95_ms":92.9}]},
@@ -170,7 +173,7 @@ Optional headers `X-Sentinel-Remediation-Token: <capability>` (execution) and `X
 | mcp-observability | `:8200/mcp` (stateless streamable HTTP, JSON responses) | **tool token** (`aud=sentinel-mcp`, `telemetry:read`, ES256 via JWKS); 401 otherwise; NetworkPolicy: agent only | `list_services`, `get_recent_deploys`, `get_error_logs`, `get_service_metrics`; shapes in [06](06-lld-mcp-tools-and-chaos-lab.md#a2-tools-and-wire-shapes) |
 | gateway knowledge | `:8080/mcp` (stateless) | tool token: `SCOPE_knowledge:read`, `aud=sentinel-mcp` | `search_runbooks{query, limit 1–8}` → JSON array `[{docId,title,heading,text}]` |
 | mcp-observability (Phase 7 tool) | `:8200/mcp` | network-restricted | `probe_service{service, requests ≤ 50}` → `{service, requests, ok, errors, success_rate, p95_ms}` |
-| mcp-remediation | `:8300/mcp` (stateless) | **capability** per call: `aud=sentinel-remediation`, `scope=remediation:execute`, `action`/`target` must match the call, single-use `jti` | `rollback`, `restart`, `increase_pool{size ≤ 60}`, `failover`, `scale_out{replicas ≤ 10}`, each with `{service, dry_run}` → `{executed, dry_run, action, service, incident_id, result}`; [06 Part C](06-lld-mcp-tools-and-chaos-lab.md#part-c-mcp-toolsremediation-phase-7) |
+| mcp-remediation | `:8300/mcp` (stateless) | **capability** per call, issued by Sentinel Guard: `aud=sentinel-action`, `action`/`target` and every parameter must match the call, redeemed once at the guard | `rollback`, `restart`, `increase_pool{size ≤ 60}`, `failover`, `scale_out{replicas ≤ 10}`, each with `{service, dry_run}` → `{executed, dry_run, action, service, incident_id, guard_request, result}`; [06 Part C](06-lld-mcp-tools-and-chaos-lab.md#part-c-mcp-toolsremediation-phase-7) |
 
 Example JSON-RPC call (any MCP client sends these):
 ```json
@@ -190,10 +193,10 @@ Example JSON-RPC call (any MCP client sends these):
 | User (dev) | console dev login / `scripts/dev_token.py` | `sub`, `tenant_id`, `roles`, `iat`, `exp`; **no `iss`** | 8 h (BFF), 1 h (script) | `/api/v1/*`, only while the gateway's dev issuer is enabled (HS256) |
 | Tool token | gateway `ToolTokens` | `iss`=gateway, `sub=agent:<incident>`, `tenant_id`, `scope=knowledge:read telemetry:read`, `aud=[sentinel-mcp]`, `jti` | 15 min | gateway `/mcp`, mcp-observability `/mcp` |
 | Integration token | gateway, `POST /api/v1/integrations/alertmanager` (tenant admin) | `iss`=gateway, `sub=integration:alertmanager:<name>`, `tenant_id`, `aud=sentinel-alerts`, `scope=alerts:write`, `jti` (recorded) | 1–90 days (default 30), **revocable** | `/api/v1/alerts/**` only, while its `jti` is active |
-| **Capability** | gateway `RemediationTokens`, at approval | `iss`=gateway, `sub=agent:<incident>`, `aud=[sentinel-remediation]`, `jti`, `tenant_id`, `scope=remediation:execute`, `incident_id`, `action`, `target`, `approved_by` | 5 min, **single use** | remediation adapter, for that action on that target only |
+| **Capability** (Phase 11) | **Sentinel Guard**, issued once to the requesting agent after a human approved (§8.1) | `iss`=`sentinel-guard`, `sub`=the agent's identity, `aud=[sentinel-action]`, `jti`, `request_id`, `action`, `target`, `namespace` (the tenant), `change` (`incident`, `size`/`replicas`), `fingerprint`, `approved_by` | until the approval expires (10 min), **single use** (redeemed at the guard) | remediation adapter, for that action, target and parameters only |
 | Agent-call token (Phase 8) | gateway `AgentTokens`, per request | `iss`=gateway, `sub=gateway`, `aud=[sentinel-agent]`, `tenant_id`, `jti` | 60 s | agent API, for that tenant only |
 
-**Signing (Phase 8):** every service token is **ES256**, signed by the gateway with a `kid` from its key ring. Verifiers (the gateway itself, the agent, both MCP servers, the remediation adapter) use the public keys at `/.well-known/jwks.json` and hold no secret. User tokens come from the IdP (RS256), or are HS256 dev tokens. The gateway picks the verifier by issuer, with the algorithm pinned per issuer ([ADR-0009](../adr/0009-zero-trust-identity.md)). The gateway's general API rejects every service audience.
+**Signing (Phase 8):** every service token above except the capability is **ES256**, signed by the gateway with a `kid` from its key ring. Verifiers (the gateway itself, the agent, the observability MCP server) use the public keys at `/.well-known/jwks.json` and hold no secret. Capabilities are ES256 from Sentinel Guard's own key (Phase 11); the remediation adapter verifies them against the guard's JWKS. User tokens come from the IdP (RS256), or are HS256 dev tokens. The gateway picks the verifier by issuer, with the algorithm pinned per issuer ([ADR-0009](../adr/0009-zero-trust-identity.md)). The gateway's general API rejects every service audience.
 
 ## 6. Kafka
 `knowledge.documents`: see [05 §2](05-lld-ingestion-and-knowledge.md#2-event-contract). DLT: `knowledge.documents-dlt`.
@@ -220,7 +223,7 @@ Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8
 | `GET /v1/actions/{id}` | the requesting agent (others get 404) | as above; once approved, the capability is returned **once** |
 | `POST /v1/capabilities/spend` | none (the capability is the credential) | `{capability, executor?}` → `200 {request, claims}` · `409` already used / no longer valid · `403` invalid (signature, `alg`, issuer, audience, expiry) |
 | `GET /v1/actions` | admin token (memory mode) | `{requests: [...]}` |
-| `POST /v1/actions/{id}/approve`, `/deny` | admin token (memory mode); 404 in Kubernetes (approve with `kubectl sentinel`) | `{approver, note?}` → the request. 403 for the requester; 409 if decided or expired |
+| `POST /v1/actions/{id}/approve`, `/deny` | the admin token (memory mode), or a **delegate** (policy `delegates`; Phase 11): a service that authenticated the person itself, e.g. Sentinel's gateway. In Kubernetes there is no admin token: people approve with `kubectl sentinel`, and only delegates use HTTP (others: 403) | `{approver, note?}` → the request, with `decidedBy` = approver and `decidedVia` = the delegate (the audit event reads "… [via …]"). 403 if the approver or the delegate is the requester; 409 if decided or expired |
 | `GET /v1/audit/verify` | admin token | `{ok, events, requests, headSeq, voided, problems[]}` |
 | `GET /.well-known/jwks.json` | none | ES256 public key (`kid` = thumbprint) |
 | `GET /healthz`, `/readyz` | none | readiness waits for the watch cache and bootstrap |

@@ -1,16 +1,19 @@
 """Remediation MCP server: the only component that changes production.
 
-Every tool call must carry a **capability token** that the gateway mints at the moment a human
-approves an incident's proposal. The token is bound to one tenant, one incident, one action and one
-target service, lives 5 minutes, and is **single-use**. So even a compromised agent can only
-execute exactly what a human approved, once.
+Every tool call must carry a **capability** issued by Sentinel Guard once a human approved the
+incident's proposal (the gateway records the decision in the guard on the reviewer's behalf). It is
+bound to one action on one target service, with its exact parameters, for one incident; it expires
+with the approval and is **single-use**. So even a compromised agent can only execute exactly what
+a human approved, once.
 
-    Authorization: Bearer <capability token>
-    claims: aud=sentinel-remediation, scope=remediation:execute, action, target, incident_id, tenant_id, jti, exp
+    Authorization: Bearer <capability>
+    claims: iss=sentinel-guard, aud=sentinel-action, action, target, namespace (tenant),
+            change {incident, size | replicas}, request_id, approved_by, jti, exp
 
-Replay protection fails CLOSED (no replay store → no execution): the opposite trade-off to rate
-limiting, because a duplicated rollback is worse than a delayed one. Dry runs validate the
-capability without consuming it or touching the service.
+Before any side effect the adapter verifies the capability against the guard's public key (ES256),
+checks action, target and every parameter, then **redeems it at the guard**, which consumes it
+atomically. If the guard can't be reached, nothing executes (fail closed): a duplicated rollback is
+worse than a delayed one. Dry runs verify without redeeming or touching the service.
 
 In production the same tool contracts would front the real deploy system (Argo Rollouts, kubectl,
 the feature-flag service); here they drive chaos-lab's /ops endpoints.
@@ -20,7 +23,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from datetime import datetime, timezone
 
 import httpx
@@ -31,8 +33,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-AUDIENCE = "sentinel-remediation"
-SCOPE = "remediation:execute"
+AUDIENCE = "sentinel-action"
 MAX_POOL = 60
 MAX_REPLICAS = 10  # db-connection-pool runbook: never above 60 per pod
 TIMEOUT = httpx.Timeout(10.0)
@@ -41,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 mcp = FastMCP(
     "sentinel-remediation",
-    instructions="Executes approved remediations. Every call needs a capability token minted at approval.",
+    instructions="Executes approved remediations. Every call needs a capability issued by Sentinel Guard.",
     host=os.getenv("HOST", "127.0.0.1"),
     port=int(os.getenv("PORT", "8300")),
     stateless_http=True,
@@ -53,64 +54,49 @@ class CapabilityError(PermissionError):
     pass
 
 
-# --- replay store --------------------------------------------------------------------------------
-
-class MemoryReplayStore:
-    def __init__(self):
-        self.used: dict[str, float] = {}
-
-    def claim(self, jti: str, ttl_s: int) -> bool:
-        now = time.time()
-        self.used = {k: v for k, v in self.used.items() if v > now}
-        if jti in self.used:
-            return False
-        self.used[jti] = now + ttl_s
-        return True
+def guard_url() -> str:
+    return os.getenv("SENTINEL_GUARD_URL", "http://localhost:8400").rstrip("/")
 
 
-class RedisReplayStore:
-    def __init__(self, url: str):
-        import redis
-        self.redis = redis.Redis.from_url(url, socket_timeout=1.0, socket_connect_timeout=1.0)
-
-    def claim(self, jti: str, ttl_s: int) -> bool:
-        return bool(self.redis.set(f"capability:{jti}", "1", nx=True, ex=max(ttl_s, 1)))
+# The guard's public keys: this adapter can verify capabilities but never mint one.
+GUARD = GatewayKeys(issuer=os.getenv("SENTINEL_GUARD_ISSUER", "sentinel-guard"),
+                    jwks_url=f"{guard_url()}/.well-known/jwks.json")
 
 
-def replay_store():
-    url = os.getenv("SENTINEL_REPLAY_STORE", "redis://localhost:6379/0")
-    return MemoryReplayStore() if url == "memory" else RedisReplayStore(url)
-
-
-STORE = replay_store()
-GATEWAY = GatewayKeys()
+def redeem(token: str) -> None:
+    """Consumes the capability at the guard (atomically, once). Any doubt refuses."""
+    try:
+        response = httpx.post(f"{guard_url()}/v1/capabilities/spend", timeout=TIMEOUT,
+                              json={"capability": token, "executor": "sentinel-remediation"})
+    except httpx.HTTPError as e:
+        raise CapabilityError(f"Sentinel Guard unavailable, refusing to execute: {e}") from e
+    if response.status_code == 409:
+        raise CapabilityError("capability already used")
+    if response.status_code != 200:
+        raise CapabilityError(f"Sentinel Guard refused the capability: HTTP {response.status_code} {response.text[:200]}")
 
 
 # --- capability check ----------------------------------------------------------------------------
 
-def authorize(token: str | None, action: str, service: str, dry_run: bool) -> dict:
-    """Validates the capability for exactly this action on exactly this service; consumes it unless dry run."""
+def authorize(token: str | None, action: str, service: str, dry_run: bool, params: dict | None = None) -> dict:
+    """Validates the capability for exactly this action, service and parameters; redeems it unless dry run."""
     if not token:
         raise CapabilityError("missing capability token")
     try:
-        # ES256 against the gateway's public keys: this adapter can verify capabilities but never mint one.
-        claims = GATEWAY.verify(token, AUDIENCE)
+        claims = GUARD.verify(token, AUDIENCE)  # ES256, the guard's issuer, aud, exp
     except jwt.PyJWTError as e:
         raise CapabilityError(f"invalid capability token: {e}") from e
-    if "jti" not in claims:
-        raise CapabilityError("invalid capability token: no jti")
-    if SCOPE not in str(claims.get("scope", "")).split():
-        raise CapabilityError("token lacks remediation:execute")
+    if not claims.get("jti") or not claims.get("request_id"):
+        raise CapabilityError("invalid capability token: no jti or request_id")
     if claims.get("action") != action or claims.get("target") != service:
         raise CapabilityError(f"capability covers {claims.get('action')} on {claims.get('target')}, "
                               f"not {action} on {service}")
+    approved = claims.get("change") or {}
+    for name, value in (params or {}).items():
+        if str(approved.get(name)) != str(value):
+            raise CapabilityError(f"capability approves {name}={approved.get(name)}, not {name}={value}")
     if not dry_run:
-        try:
-            first_use = STORE.claim(claims["jti"], int(claims["exp"] - time.time()) + 60)
-        except Exception as e:  # replay store down: refuse (fail closed)
-            raise CapabilityError(f"replay protection unavailable, refusing to execute: {e}") from e
-        if not first_use:
-            raise CapabilityError("capability already used")
+        redeem(token)
     return claims
 
 
@@ -130,10 +116,11 @@ def _execute(action: str, service: str, dry_run: bool, ctx: Context | None, path
     base = targets().get(service)
     if not base:
         raise ValueError(f"unknown service {service!r}; known: {sorted(targets())}")
-    claims = authorize(_bearer(ctx), action, service, dry_run)
+    claims = authorize(_bearer(ctx), action, service, dry_run, body)
+    incident = (claims.get("change") or {}).get("incident")
     record = {"ts": datetime.now(timezone.utc).isoformat(), "audit": "remediation", "action": action,
-              "service": service, "dry_run": dry_run, "incident_id": claims.get("incident_id"),
-              "tenant_id": claims.get("tenant_id"), "approved_by": claims.get("approved_by"), "jti": claims["jti"]}
+              "service": service, "dry_run": dry_run, "incident_id": incident, "tenant_id": claims.get("namespace"),
+              "approved_by": claims.get("approved_by"), "guard_request": claims.get("request_id"), "jti": claims["jti"]}
     if dry_run:
         result = {"plan": f"POST {path}", "body": body or {}}
     else:
@@ -142,7 +129,7 @@ def _execute(action: str, service: str, dry_run: bool, ctx: Context | None, path
         result = response.json()
     log.info(json.dumps({**record, "result": result}))
     return {"executed": not dry_run, "dry_run": dry_run, "action": action, "service": service,
-            "incident_id": claims.get("incident_id"), "result": result}
+            "incident_id": incident, "guard_request": claims.get("request_id"), "result": result}
 
 
 @mcp.tool()

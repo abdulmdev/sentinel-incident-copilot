@@ -49,6 +49,7 @@ scripts/dev-local.sh down
 | Traces (Jaeger) | http://localhost:16686 |
 | Dashboard (Grafana) | http://localhost:3001 |
 | Prometheus | http://localhost:9090 |
+| Sentinel Guard (approvals, audit) | http://localhost:8400 (`/v1/audit/verify` with the dev admin token from `scripts/dev-local.sh`) |
 
 ## Use it: the 5-minute tour
 1. **Sign in.** At http://localhost:3000 click **Sign in with Keycloak**. The dev users are `alice@acme` (tenant admin), `bob@acme` and `carol@globex`; their test passwords are in `deploy/keycloak/sentinel-realm.json`. There's also a one-click *dev sign-in* for local use.

@@ -130,5 +130,6 @@ docs/                   handbook (this), DESIGN.md, DEMO.md, ADRs, load-test res
 | 8 | Zero-trust identity | ES256 service tokens + JWKS (only the gateway mints), Keycloak OIDC login, every hop authenticated, revocable integration tokens, checkpoint RLS |
 | 9 | Publish and measure | Public repo, website, recorded demo; full gemma4 benchmark; runbook preconditions take a local 8B model from 11.6% to 0% harmful actions |
 | 10 | Sentinel Guard (v2 alpha) | The safety core as a Kubernetes-native service for any agent: admission webhook, approvals with `kubectl sentinel`, exactly-once on a real API server, signed hash-chained audit; p99 42.9 ms for an approved change (chapter 17) |
+| 11 | The copilot on Sentinel Guard | One safety core: the agent proposes to the guard, the console's approvals are recorded there by the gateway (delegate), the adapter redeems the guard's capability; live TTM 24.4 s; 252 tests |
 
 Full detail, including every bug found: [15 Phase history](15-phase-history.md).

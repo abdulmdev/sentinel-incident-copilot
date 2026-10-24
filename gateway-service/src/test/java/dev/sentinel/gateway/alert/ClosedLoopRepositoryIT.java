@@ -179,10 +179,12 @@ class ClosedLoopRepositoryIT {
     void auditIsTenantScoped() {
         UUID id = incident("umbrella");
         audit.record("umbrella", new RemediationAuditRepository.Entry(id, "rollback", "checkout", "alice",
-                "jti-1", true, true, "RESOLVED", null));
+                "jti-1", "ar-1a2b3c4d-1", true, true, "RESOLVED", null));
 
-        assertThat(audit.forIncident("umbrella", id)).singleElement()
-                .satisfies(e -> assertThat(e.capabilityJti()).isEqualTo("jti-1"));
+        assertThat(audit.forIncident("umbrella", id)).singleElement().satisfies(e -> {
+            assertThat(e.capabilityJti()).isEqualTo("jti-1");
+            assertThat(e.guardRequest()).isEqualTo("ar-1a2b3c4d-1"); // V8
+        });
         assertThat(audit.forIncident("acme", id)).isEmpty();
     }
 }

@@ -55,9 +55,9 @@ Key models:
 
 *Figure 4.2: The incident workflow as a LangGraph state machine*
 
-`run_config(tenant, incident, tool_token=None, remediation_token=None)` returns:
+`run_config(tenant, incident, tool_token=None)` returns:
 - `configurable.thread_id = "<tenant>:<incident>"`. The tenant is part of the key, so one tenant can never load another's thread.
-- `configurable.tool_token` and `configurable.remediation_token` (the capability): they live only in config, **never in state**, so they are never checkpointed (both asserted by tests).
+- `configurable.tool_token`: it lives only in config, **never in state**, so it's never checkpointed (asserted by tests). The capability doesn't pass through config at all since Phase 11: `execute` collects it from Sentinel Guard and hands it straight to the adapter.
 - `recursion_limit = 2 × MAX_TOOL_CALLS + 16`: a hard backstop under the explicit budgets (Phase 7 added three nodes).
 
 Routing after the pause:
@@ -127,10 +127,25 @@ RCA system prompt, key instructions:
 
 - `approval`: `interrupt({"proposed": remediation})` pauses the graph; the state is checkpointed. Resumed with `Command(resume=decision)` → `REJECTED` if rejected; `ESCALATED` if approved and the action is `escalate` (there's nothing to execute); otherwise `REMEDIATING`. Sets `timeline.decided_at`.
 
-### 3.6a `execute` (Phase 7)
-- Reads the capability from `configurable.remediation_token`. None → `execution = {executed: false, error: "no capability token for this action"}`, status `REMEDIATION_FAILED`. Nothing is called.
-- `toolbox.remediation_tools(capability)` connects to the remediation MCP server with `Authorization: Bearer <capability>`, uncached: a capability is single-use.
-- The tool is the one **named after the approved action**, with args `{service: target}` (plus `size: 40` for `increase_pool`). A missing operation fails clearly ("the remediation adapter has no 'X' operation").
+### 3.5b `request_approval` (Phase 11)
+Registers the proposal with Sentinel Guard **once, before** the human is asked: `GuardClient.propose(action, tenant, target, change, intent)` (`app/guard_client.py`) → `POST /v1/actions` with
+- target `{namespace: tenant, name: service}`;
+- change `{incident, size | replicas}`: `_params` gives `size: 40` for `increase_pool` and `replicas: 4` for `scale_out`. The guard binds the approval to these exact values, and the adapter checks them;
+- intent: the proposal's reason.
+
+Its result is stored as `approval = {request, verdict, message}`:
+- `escalate` registers nothing (`request: null`).
+- No guard configured, or the guard down, is recorded as `approval.error`. The proposal still reaches the human, but nothing can execute.
+
+It is a separate node, not the start of `approval`, because LangGraph re-runs an interrupted node from the top on resume, and a second proposal after the approval would collect (and lose) the capability. The agent authenticates with `SENTINEL_GUARD_TOKEN` or a projected ServiceAccount token at `SENTINEL_GUARD_TOKEN_FILE`, re-read on every call. A test asserts it proposes exactly once across the resume.
+
+### 3.6a `execute` (Phase 7; capability from the guard since Phase 11)
+- `GuardClient.capability(approval.request)` → `GET /v1/actions/{id}`. The guard issues the single-use capability **once**, and only after a human approved that request (the gateway records the decision before resuming the graph).
+  - No request, guard down, not approved, or already issued → `execution = {executed: false, error, guard_request}`, status `REMEDIATION_FAILED`. Nothing is called (fails closed).
+  - Resuming the graph is not authority: a resume with no approval recorded in the guard executes nothing (tested).
+- `toolbox.remediation_tools(capability)` connects to the remediation MCP server with `Authorization: Bearer <capability>`, uncached.
+- The tool is the one **named after the approved action**, with args `{service: target, **_params}`. A missing operation fails clearly ("the remediation adapter has no 'X' operation").
+- A successful `execution` also records `guard_request` and the capability's `jti` (read from the token, not verified: the adapter verifies). The gateway audits both.
 - The call runs in span `execute_remediation <action>` with attributes `sentinel.remediation.{action,target}`.
 - The MCP adapter returns tool errors as **text**, not exceptions. So anything that isn't a JSON object with `executed: true` (refused capability, replay, adapter down) is a failure → `REMEDIATION_FAILED`. Failures are never mistaken for success (tested).
 - Sets `timeline.executed_at`.
@@ -304,7 +319,7 @@ Details are capped at 1 500 chars.
 |---|---|
 | `POST /incidents` (body `Incident`, header `X-Sentinel-Tool-Token`) | 409 if the thread exists. Runs the graph until `interrupt()`, records metrics, returns the view |
 | `GET /tenants/{tenant}/incidents/{id}` | View or 404 |
-| `POST /tenants/{tenant}/incidents/{id}/decision` (body `Decision`, header `X-Sentinel-Remediation-Token`) | 404 if unknown; 409 unless `AWAITING_APPROVAL`; resumes the graph (approval → execute → verify → postmortem) with the capability in config; returns the view |
+| `POST /tenants/{tenant}/incidents/{id}/decision` (body `Decision`, header `X-Sentinel-Tool-Token`) | 404 if unknown; 409 unless `AWAITING_APPROVAL`; resumes the graph (approval → execute → verify → postmortem); `execute` collects the capability from Sentinel Guard; returns the view |
 | `GET /metrics` | Prometheus text |
 | `GET /healthz` | `{"status":"ok"}` |
 

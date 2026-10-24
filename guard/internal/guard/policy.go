@@ -23,6 +23,7 @@ const (
 // live in Git and be reviewed like code.
 type Policy struct {
 	Agents              Agents                  `json:"agents"`
+	Delegates           Agents                  `json:"delegates"`
 	Defaults            ActionPolicy            `json:"defaults"`
 	Actions             map[string]ActionPolicy `json:"actions"`
 	ProtectedNamespaces []string                `json:"protectedNamespaces"`
@@ -34,7 +35,8 @@ type Policy struct {
 }
 
 // Agents identifies which callers are AI agents. Everyone else (humans, CI, controllers) is
-// never stopped by the guard.
+// never stopped by the guard. The same shape lists Delegates: services trusted to record a
+// decision on behalf of a person they authenticated (Sentinel's gateway, for its console users).
 type Agents struct {
 	Users  []string `json:"users"`
 	Groups []string `json:"groups"`
@@ -142,12 +144,18 @@ func (p *Policy) For(action string) ActionPolicy {
 	return a
 }
 
-func (p *Policy) IsAgent(user string, groups []string) bool {
-	if slices.Contains(p.Agents.Users, user) {
+func (p *Policy) IsAgent(user string, groups []string) bool { return p.Agents.matches(user, groups) }
+
+func (p *Policy) IsDelegate(user string, groups []string) bool {
+	return p.Delegates.matches(user, groups)
+}
+
+func (a Agents) matches(user string, groups []string) bool {
+	if slices.Contains(a.Users, user) {
 		return true
 	}
 	for _, g := range groups {
-		if slices.Contains(p.Agents.Groups, g) {
+		if slices.Contains(a.Groups, g) {
 			return true
 		}
 	}

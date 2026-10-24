@@ -67,8 +67,12 @@ Index `incidents_tenant_created_idx (tenant_id, created_at DESC)` serves the lis
 - The comment inside `V6__closed_loop.sql` still describes the first design (the index as the lock via `ON CONFLICT DO NOTHING`). It is left as is because applied migrations are never edited (their checksum is verified).
 - RLS `FORCE`.
 
-### `remediation_audit` (V6): append-only
-`id bigserial`, `tenant_id`, `incident_id`, `action`, `target`, `approved_by`, `capability_jti`, `executed`, `verified` (null if never verified), `outcome` (final status), `error`, `created_at`. Index `(tenant_id, incident_id)`. RLS `FORCE`. Joined with the remediation adapter's JSON audit log by `capability_jti`: every operation has an approval, and every approval at most one operation.
+### `remediation_audit` (V6, extended in V8): append-only
+`id bigserial`, `tenant_id`, `incident_id`, `action`, `target`, `approved_by`, `capability_jti`, `guard_request` (V8), `executed`, `verified` (null if never verified), `outcome` (final status), `error`, `created_at`. Index `(tenant_id, incident_id)`. RLS `FORCE`.
+- Joined with the remediation adapter's JSON audit log by `capability_jti`.
+- Since Phase 11, `guard_request` links to the Sentinel Guard request whose signed audit chain records who approved it (via the gateway) and when it ran.
+
+Every operation has an approval, and every approval at most one operation.
 
 ### `integration_tokens` (V7): issued, revocable integration credentials
 `jti` (PK), `tenant_id`, `kind` (`alertmanager`), `name`, `created_by`, `created_at`, `expires_at`, `revoked_at`, `revoked_by`, `last_used_at`. Index `(tenant_id, created_at DESC)`. RLS `FORCE`.
@@ -122,6 +126,7 @@ Semantic cache for `/ask`; see [03 §6.2](03-lld-gateway.md#62-semanticcache). I
 | V5 | `V5__incident_record.sql` | `incidents`: `proposed_action`, `reviewer`, `opened_by`, `updated_at`; drop FK to `tenants`; list index |
 | V6 | `V6__closed_loop.sql` | `incidents`: `source`, `alert_fingerprint`, `opened_at`, timeline columns, `alert_resolved_at`, `execution`, `verification`, `time_to_mitigate_s`; new `alert_links` (partial unique index on active links) and `remediation_audit`, both RLS (FORCE) |
 | V7 | `V7__integration_tokens.sql` | `integration_tokens` (jti only, expiry, revocation, last use) + RLS (FORCE) |
+| V8 | `V8__guard_requests.sql` | `remediation_audit.guard_request`: the Sentinel Guard request that authorized the remediation (Phase 11) |
 
 Rules for new migrations:
 - Never edit an applied migration; add `V<n+1>__description.sql`.
@@ -131,7 +136,7 @@ Rules for new migrations:
 ## 5. Kafka and Redis data
 - **Kafka:** `knowledge.documents` (key `tenant:docId`, JSON value), `knowledge.documents-dlt` (failed records with Spring Kafka exception headers). Retention is Kafka's default; the topic is replayable to rebuild the index (e.g. after an embedding-model change).
 - **Redis:** `ratelimit:<bucket>` hashes `{tokens, ts}` with `PEXPIRE` ≈ a full refill + 1 s. Buckets are `<tenant>` (humans), `<tenant>:agent` (tool traffic) and `<tenant>:alerts` (Alertmanager).
-- **Redis (Phase 7):** the remediation adapter's **used-capability set**: `capability:<jti>` keys (`SET NX EX`, expiring with the capability). Losing Redis therefore stops *execution* (the adapter fails closed) but nothing else.
+- **Redis (Phases 7–10, removed in Phase 11):** the remediation adapter's used-capability set (`capability:<jti>`, `SET NX EX`). Single use is now enforced by Sentinel Guard (the adapter redeems each capability there), so Redis holds only rate-limit buckets.
 
 ## 6. Sentinel Guard state (Kubernetes objects, no database)
 Sentinel Guard keeps all of its state in the API server of the cluster it protects ([ADR-0010](../adr/0010-sentinel-guard.md); the v2 plan's `V8__action_log` migration was not needed):

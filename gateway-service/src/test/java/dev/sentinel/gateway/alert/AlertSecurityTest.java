@@ -20,7 +20,6 @@ import dev.sentinel.gateway.identity.ServiceTokens;
 import dev.sentinel.gateway.incident.IncidentRepository;
 import dev.sentinel.gateway.integration.IntegrationTokenRepository;
 import dev.sentinel.gateway.mcp.ToolTokens;
-import dev.sentinel.gateway.remediation.RemediationTokens;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -45,9 +44,6 @@ class AlertSecurityTest {
 
     @Autowired
     ToolTokens toolTokens;
-
-    @Autowired
-    RemediationTokens remediationTokens;
 
     @MockitoBean
     AlertService alerts;
@@ -155,8 +151,18 @@ class AlertSecurityTest {
 
     @Test
     void remediationCapabilityIsUselessAtTheGateway() throws Exception {
-        String cap = remediationTokens.mint("acme", "inc-1", "rollback", "checkout", "alice").token();
-        mvc.perform(get("/api/v1/incidents").header("Authorization", "Bearer " + cap)).andExpect(status().isForbidden());
-        mvc.perform(webhook(cap)).andExpect(status().isForbidden());
+        // Since Phase 11 capabilities come from Sentinel Guard: another issuer, another key.
+        var guardKey = dev.sentinel.gateway.identity.SigningKeys.generate("guard-key");
+        var claims = new com.nimbusds.jwt.JWTClaimsSet.Builder().issuer("sentinel-guard").audience("sentinel-action")
+                .subject("system:serviceaccount:sentinel:sentinel-agent").claim("action", "rollback")
+                .claim("target", "checkout").claim("tenant_id", "acme").jwtID("cap-1")
+                .expirationTime(java.util.Date.from(Instant.now().plusSeconds(300))).build();
+        var jws = new com.nimbusds.jwt.SignedJWT(new com.nimbusds.jose.JWSHeader.Builder(com.nimbusds.jose.JWSAlgorithm.ES256)
+                .keyID("guard-key").build(), claims);
+        jws.sign(new com.nimbusds.jose.crypto.ECDSASigner(guardKey));
+        String cap = jws.serialize();
+        // Not even authenticated: the gateway doesn't trust the guard's issuer at all.
+        mvc.perform(get("/api/v1/incidents").header("Authorization", "Bearer " + cap)).andExpect(status().isUnauthorized());
+        mvc.perform(webhook(cap)).andExpect(status().isUnauthorized());
     }
 }

@@ -9,6 +9,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGS="$ROOT/.logs"
 MODEL="$ROOT/.models/all-MiniLM-L6-v2/model.onnx"
 MODEL_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx"
+# Sentinel Guard runs as one process (memory mode) on :8400. Dev-only tokens: the agent proposes with one,
+# the gateway records reviewers' decisions with the other (as a delegate).
+GUARD_URL=http://localhost:8400
+GUARD_AGENT_TOKEN=dev-guard-agent-token
+GUARD_GATEWAY_TOKEN=dev-guard-gateway-token
 
 wait_for() { # url, name
   for _ in $(seq 1 120); do curl -sf -m 2 "$1" >/dev/null && { echo "  ✓ $2"; return; }; sleep 1; done
@@ -29,11 +34,21 @@ up() {
   export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
   export MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
+  echo "Building Sentinel Guard"
+  GO="$ROOT/.tools/go/bin/go"; [ -x "$GO" ] || GO=go
+  (cd "$ROOT/guard" && "$GO" build -o "$LOGS/sentinel-guard" ./cmd/sentinel-guard)
+
   echo "Building Java services"
   (cd "$ROOT/ingestion-service" && mvn -q package -DskipTests)
   (cd "$ROOT/gateway-service" && mvn -q package -DskipTests)
 
   echo "Starting services"
+  (SENTINEL_GUARD_MODE=memory SENTINEL_GUARD_ADDR=:8400 SENTINEL_GUARD_METRICS_ADDR=:9095 \
+    SENTINEL_GUARD_POLICY="$ROOT/deploy/guard/copilot-policy.yaml" \
+    SENTINEL_GUARD_AGENT_TOKENS="sentinel-agent=$GUARD_AGENT_TOKEN" \
+    SENTINEL_GUARD_DELEGATE_TOKENS="sentinel-gateway=$GUARD_GATEWAY_TOKEN" \
+    SENTINEL_GUARD_ADMIN_TOKEN=dev-guard-admin-token \
+    nohup "$LOGS/sentinel-guard" >"$LOGS/sentinel-guard.log" 2>&1 &)
   (cd "$ROOT/chaos-lab/service" && [ -d .venv ] || uv venv -q -p 3.12 .venv) && \
     (cd "$ROOT/chaos-lab/service" && uv pip install -q -p .venv -r requirements.txt)
   (cd "$ROOT/chaos-lab/service" && SERVICE_NAME=inventory nohup .venv/bin/uvicorn main:app --port 8102 >"$LOGS/inventory.log" 2>&1 &)
@@ -42,7 +57,7 @@ up() {
   (cd "$ROOT/mcp-tools/observability" && OBSERVED_SERVICES=checkout=http://localhost:8101,inventory=http://localhost:8102 \
     nohup uv run python server.py >"$LOGS/mcp-observability.log" 2>&1 &)
   (cd "$ROOT/mcp-tools/remediation" && OPS_SERVICES=checkout=http://localhost:8101,inventory=http://localhost:8102 \
-    SENTINEL_REPLAY_STORE=redis://localhost:6379/0 nohup uv run python server.py >"$LOGS/mcp-remediation.log" 2>&1 &)
+    SENTINEL_GUARD_URL=$GUARD_URL nohup uv run python server.py >"$LOGS/mcp-remediation.log" 2>&1 &)
   (cd "$ROOT/chaos-lab/service" && LOADGEN_TARGETS=http://localhost:8101 \
     nohup .venv/bin/python loadgen.py >"$LOGS/loadgen.log" 2>&1 &)
   (cd "$ROOT/ingestion-service" && nohup java -jar target/ingestion-service-0.1.0.jar >"$LOGS/ingestion.log" 2>&1 &)
@@ -51,11 +66,15 @@ up() {
   (cd "$ROOT/agent-service" && \
     SENTINEL_CHECKPOINT_DSN="postgresql://sentinel_app:sentinel_app@localhost:5432/sentinel?options=-csearch_path%3Dlanggraph" \
     SENTINEL_MCP_OBSERVABILITY_URL=http://localhost:8200/mcp SENTINEL_MCP_KNOWLEDGE_URL=http://localhost:8080/mcp \
-    SENTINEL_MCP_REMEDIATION_URL=http://localhost:8300/mcp nohup uv run uvicorn app.main:app --port 8000 >"$LOGS/agent.log" 2>&1 &)
+    SENTINEL_MCP_REMEDIATION_URL=http://localhost:8300/mcp \
+    SENTINEL_GUARD_URL=$GUARD_URL SENTINEL_GUARD_TOKEN=$GUARD_AGENT_TOKEN \
+    nohup uv run uvicorn app.main:app --port 8000 >"$LOGS/agent.log" 2>&1 &)
   # Users: Keycloak (OIDC) or dev tokens. Service tokens: the gateway's own ES256 keys (ephemeral here).
   (cd "$ROOT/gateway-service" && SENTINEL_AGENT_URL=http://localhost:8000 SENTINEL_DEV_TOKENS=true \
+    SENTINEL_GUARD_URL=$GUARD_URL SENTINEL_GUARD_TOKEN=$GUARD_GATEWAY_TOKEN \
     SENTINEL_OIDC_ISSUER=http://localhost:8180/realms/sentinel \
     nohup java -jar target/gateway-service-0.1.0.jar >"$LOGS/gateway.log" 2>&1 &)
+  wait_for http://localhost:8400/healthz sentinel-guard
   wait_for http://localhost:8101/healthz checkout
   wait_for http://localhost:8200/healthz mcp-observability
   wait_for http://localhost:8300/healthz mcp-remediation
@@ -84,6 +103,7 @@ down() {
   pkill -f 'python loadgen.py' || true
   pkill -f 'next start' || true
   pkill -f 'next-server' || true
+  pkill -f '.logs/sentinel-guard' || true
   echo "Stopped local services. Infra still running: (cd deploy && docker compose stop)"
 }
 

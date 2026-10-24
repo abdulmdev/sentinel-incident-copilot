@@ -112,7 +112,7 @@ func TestWorkloadWebhook(t *testing.T) {
 	if !preview.Allowed || len(preview.Warnings) == 0 {
 		t.Fatal("server-side dry runs are previews: admitted with a warning")
 	}
-	if _, err := s.Engine.Decide(t.Context(), id, "alice", nil, true, ""); err != nil {
+	if _, err := s.Engine.Decide(t.Context(), id, "alice", nil, "", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if ok := admit(t, h, "/admission/workloads", scaleReview(agentUser, []string{agentsGrp}, 2, 3, false)); !ok.Allowed {
@@ -270,7 +270,7 @@ func TestKubeObjectRoundTripKeepsAuditValid(t *testing.T) {
 	out, _ := s.Engine.Evaluate(t.Context(), guard.Proposal{Source: guard.SourceAdmission, Agent: agentUser, Action: "scale",
 		Change: map[string]string{"replicas": "2 → 3"}, Fingerprint: "replicas=3",
 		Target: guard.Target{Group: "apps", Resource: "deployments", Namespace: "shop", Name: "web"}})
-	_, _ = s.Engine.Decide(t.Context(), out.Request.ID, "alice", nil, true, "fine")
+	_, _ = s.Engine.Decide(t.Context(), out.Request.ID, "alice", nil, "", true, "fine")
 	r, _ := mem.Get(t.Context(), out.Request.ID)
 	obj, err := store.ToObject(r)
 	if err != nil {
@@ -288,5 +288,70 @@ func TestKubeObjectRoundTripKeepsAuditValid(t *testing.T) {
 	head, _ := mem.Head(t.Context())
 	if rep := guard.VerifyAudit([]*guard.Request{r2}, head, s.Engine.Signer.PublicKeys()); !rep.OK {
 		t.Fatalf("the audit must survive the Kubernetes round trip: %+v", rep)
+	}
+}
+
+func TestDelegatedDecisions(t *testing.T) {
+	s, _ := newServer(t)
+	s.Agents = StaticTokens{"agent-token": "sentinel-agent", "gw-token": "sentinel-gateway", "other-token": "someone"}
+	s.Engine.Policy().Delegates.Users = []string{"sentinel-gateway"}
+	s.Engine.Policy().Agents.Users = []string{"sentinel-agent"}
+	h := s.Handler()
+	propose := func(incident string) string {
+		rec := post(t, h, "/v1/actions", ProposeRequest{Action: "rollback", Target: guard.Target{Namespace: "acme", Name: "checkout"},
+			Change: map[string]string{"incident": incident}}, "agent-token")
+		var out guard.Outcome
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out.Request.ID
+	}
+	id := propose("inc-1")
+
+	if rec := post(t, h, "/v1/actions/"+id+"/approve", map[string]string{"approver": "alice@acme"}, "other-token"); rec.Code != 401 {
+		t.Fatalf("a caller that is not a delegate decided: %d", rec.Code)
+	}
+	if rec := post(t, h, "/v1/actions/"+id+"/approve", map[string]string{"approver": "sentinel-agent"}, "gw-token"); rec.Code != 403 {
+		t.Fatalf("a delegate approved on behalf of the requesting agent: %d", rec.Code)
+	}
+	rec := post(t, h, "/v1/actions/"+id+"/approve", map[string]string{"approver": "alice@acme", "note": "console"}, "gw-token")
+	var r guard.Request
+	_ = json.Unmarshal(rec.Body.Bytes(), &r)
+	if rec.Code != 200 || r.DecidedBy != "alice@acme" || r.DecidedVia != "sentinel-gateway" || r.Phase != guard.PhaseApproved {
+		t.Fatalf("delegated approval: %d %+v", rec.Code, r)
+	}
+	if d := r.Audit[len(r.Audit)-1]; d.Actor != "alice@acme" || !strings.Contains(d.Detail, "via sentinel-gateway") {
+		t.Fatalf("the audit must show who decided and through whom: %+v", d)
+	}
+	get := httptest.NewRequest(http.MethodGet, "/v1/actions/"+id, nil)
+	get.Header.Set("Authorization", "Bearer agent-token")
+	got := httptest.NewRecorder()
+	h.ServeHTTP(got, get)
+	var out guard.Outcome
+	_ = json.Unmarshal(got.Body.Bytes(), &out)
+	claims, err := s.Engine.Signer.VerifyCapability(out.Capability)
+	if err != nil || claims.Namespace != "acme" || claims.Target != "checkout" || claims.Change["incident"] != "inc-1" || claims.ApprovedBy != "alice@acme" {
+		t.Fatalf("the capability must carry the scope and the approved parameters: %v %+v", err, claims)
+	}
+
+	// In Kubernetes there is no admin token: only delegates may decide over HTTP.
+	s.AdminToken = ""
+	id2 := propose("inc-2")
+	if rec := post(t, h, "/v1/actions/"+id2+"/deny", map[string]string{"approver": "bob@acme"}, "agent-token"); rec.Code != 403 {
+		t.Fatalf("an agent denied over HTTP: %d", rec.Code)
+	}
+	if rec := post(t, h, "/v1/actions/"+id2+"/deny", map[string]string{"approver": "bob@acme"}, "gw-token"); rec.Code != 200 {
+		t.Fatalf("delegated denial: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAPIHandlerHasNoWebhooks(t *testing.T) {
+	s, _ := newServer(t)
+	rec := post(t, s.APIHandler(), "/admission/workloads", scaleReview(agentUser, []string{agentsGrp}, 2, 3, false), "")
+	if rec.Code != 404 {
+		t.Fatalf("the plain-HTTP API listener must not serve admission: %d", rec.Code)
+	}
+	jwks := httptest.NewRecorder()
+	s.APIHandler().ServeHTTP(jwks, httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil))
+	if jwks.Code != 200 {
+		t.Fatal(jwks.Code)
 	}
 }

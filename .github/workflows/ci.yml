@@ -126,10 +126,11 @@ jobs:
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
           H=deploy/helm/sentinel
+          helm dependency build $H   # Sentinel Guard subchart
           helm lint deploy/helm/sentinel-deps
           for overlay in "" "-f $H/values-kind.yaml" "-f $H/values-aws.yaml"; do
             helm lint $H $overlay
-            helm template t $H $overlay | ./kubeconform -strict -summary -skip ExternalSecret
+            helm template t $H $overlay | ./kubeconform -strict -summary -skip ExternalSecret,CustomResourceDefinition
           done
       - name: Sentinel Guard chart (lint + strict schema validation)
         # kubeconform has no schema for CRD objects themselves; the real API server validates the CRD in guard-e2e.
@@ -139,6 +140,7 @@ jobs:
       - name: Least privilege - who may hold which secret (signing keys only in the gateway)
         run: |
           H=deploy/helm/sentinel
+          helm dependency build $H
           helm template t $H --set secrets.create=true --set secrets.values.signingKeys=x \
             --set secrets.values.dbAppPassword=x --set secrets.values.dbAdminPassword=x \
             | python3 scripts/check_chart_secrets.py --prod

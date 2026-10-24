@@ -54,17 +54,13 @@ public class AgentClient {
                 .headers(h -> h.setBearerAuth(tokens.mint(tenant))).retrieve().body(JSON);
     }
 
-    public Map<String, Object> decide(String tenant, String id, Map<String, Object> decision, String capability,
-                                      String toolToken) {
+    public Map<String, Object> decide(String tenant, String id, Map<String, Object> decision, String toolToken) {
         // Not retried: a decision is a state change the caller should see fail and confirm again.
-        // Credentials go in headers so the agent never checkpoints them: the capability (if any) for
-        // execution, the tool token for verification probes.
-        var request = http.post().uri("/tenants/{t}/incidents/{id}/decision", tenant, id)
+        // The tool token (for verification probes) goes in a header so the agent never checkpoints it.
+        // No authority to execute travels here: the agent collects its capability from Sentinel Guard.
+        return http.post().uri("/tenants/{t}/incidents/{id}/decision", tenant, id)
                 .headers(h -> h.setBearerAuth(tokens.mint(tenant)))
-                .header("X-Sentinel-Tool-Token", toolToken);
-        if (capability != null) {
-            request = request.header("X-Sentinel-Remediation-Token", capability);
-        }
-        return request.body(decision).retrieve().body(JSON);
+                .header("X-Sentinel-Tool-Token", toolToken)
+                .body(decision).retrieve().body(JSON);
     }
 }

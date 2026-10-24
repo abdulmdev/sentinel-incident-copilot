@@ -142,28 +142,30 @@ A deploy-tool adapter over MCP (port **8300**, stateless streamable HTTP, same r
 
 Targets come from `OPS_SERVICES="checkout=http://…,inventory=http://…"`. Unknown service → tool error.
 
-### C.2 `authorize(token, action, service, dry_run)`
+### C.2 `authorize(token, action, service, dry_run, params)` (capabilities from Sentinel Guard since Phase 11)
 The bearer comes from the MCP request's `Authorization` header (via the request context).
-1. `GATEWAY.verify(token, "sentinel-remediation")` (`gateway_keys.py`, Phase 8):
-   - **ES256 only** (anything else → "only ES256 gateway tokens are accepted");
-   - the key is chosen by `kid` from the gateway's JWKS (`SENTINEL_ISSUER` / `SENTINEL_JWKS_URL`; cached, refetched on an unknown `kid`);
-   - `iss`, `aud`, `exp` and `iat` required; `jti` required.
+1. `GUARD.verify(token, "sentinel-action")` (`gateway_keys.py`, a generic JWKS verifier):
+   - **ES256 only** (anything else → "only ES256 … tokens are accepted");
+   - the key is chosen by `kid` from **Sentinel Guard's** JWKS (`{SENTINEL_GUARD_URL}/.well-known/jwks.json`; cached, refetched on an unknown `kid`);
+   - `iss` = `SENTINEL_GUARD_ISSUER` (default `sentinel-guard`); `aud`, `exp` and `iat` required; `jti` and `request_id` required.
 
-   Failure → "invalid capability token". **The adapter holds no secret**: it can verify capabilities but never mint one. Phase 7 used a shared HS256 secret, which anything holding it could have forged with.
-2. `scope` must contain `remediation:execute`.
-3. `claims.action == <this tool>` and `claims.target == service`, else "capability covers X on Y, not A on S".
-4. **Not dry run:** `STORE.claim(jti, ttl = exp − now)`, which is Redis `SET NX EX` (`SENTINEL_REPLAY_STORE`, default `redis://localhost:6379/0`; `memory` for tests).
-   - Already present → "capability already used".
-   - **Redis unreachable → "replay protection unavailable, refusing to execute"** (fail closed).
+   Failure → "invalid capability token". **The adapter holds no secret**: it can verify capabilities but never mint one. The gateway's own tokens are refused too (another issuer). Phase 7 used a shared HS256 secret; Phases 7–10 accepted gateway-minted capabilities.
+2. `claims.action == <this tool>` and `claims.target == service`, else "capability covers X on Y, not A on S".
+3. **Every parameter must equal the approved one** (`claims.change`): `increase_pool(size=60)` with an approval for `size=40` → "capability approves size=40, not size=60"; a parameter that was never approved is refused the same way.
+4. **Not dry run:** redeem at the guard: `POST {SENTINEL_GUARD_URL}/v1/capabilities/spend` (`executor: sentinel-remediation`), which consumes it atomically.
+   - 409 → "capability already used".
+   - **Guard unreachable or any other answer → "Sentinel Guard unavailable, refusing to execute"** (fail closed).
 
-Only then the ops call. Output: one JSON audit line (`audit: remediation`, action, service, dry_run, incident_id, tenant_id, approved_by, jti, result) and `{"executed": not dry_run, "dry_run", "action", "service", "incident_id", "result"}`.
+   The Phase 7–10 Redis replay store (`SENTINEL_REPLAY_STORE`) and the `redis` dependency are gone: single use is enforced once, by the guard, for every executor.
+
+Only then the ops call. Output: one JSON audit line (`audit: remediation`, action, service, dry_run, incident_id and tenant_id from the claims' `change` and `namespace`, approved_by, guard_request, jti, result) and `{"executed": not dry_run, "dry_run", "action", "service", "incident_id", "guard_request", "result"}`.
 
 ### C.3 Why the checks live here
 Defense in depth:
-- the gateway decides *whether* to mint;
+- a human decides, in Sentinel Guard, *whether* to approve (and the guard issues the capability);
 - the adapter decides *whether a token permits this exact call*.
 
-A bug or injection in the agent can't widen the approval. A leaked capability is worth one operation for at most 5 minutes, and nothing at all once spent.
+A bug or injection in the agent can't widen the approval. A leaked capability is worth one operation, with the approved parameters, until the approval expires (10 minutes), and nothing at all once redeemed.
 
-### C.4 Tests (14)
-See [14 Testing & CI](14-testing-and-ci.md#mcp-remediation-14): execute-once with the replay refused before the service is reached; five not-exactly-approved variants; missing or forged token (attacker EC key with the same `kid`); **a capability forged with the old shared HS256 secret is refused**; a capability from another issuer is refused; dry run doesn't consume; Redis outage fails closed; pool and scale-out bounds.
+### C.4 Tests (17)
+See [14 Testing & CI](14-testing-and-ci.md#mcp-remediation-17): execute-once with the replay refused at the guard before the service is reached; seven not-exactly-approved variants (action, target, two wrong audiences incl. the old `sentinel-remediation`, expiry, a parameter that differs, a parameter never approved), all refused **before anything is redeemed**; missing or forged token (attacker EC key with the same `kid`); a capability forged with the old shared HS256 secret is refused; a capability from another issuer (incl. the gateway) is refused; dry run doesn't redeem; the guard unreachable or erroring fails closed; pool and scale-out bounds.

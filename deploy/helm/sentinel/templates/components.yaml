@@ -24,6 +24,12 @@ spec:
         prometheus.io/path: {{ . }}
         {{- end }}
     spec:
+      {{- if $c.guardIdentity }}
+      {{- /* Its own identity towards Sentinel Guard: the agent proposes, the gateway decides on a
+             person's behalf; the guard tells them apart by ServiceAccount (TokenReview). */}}
+      serviceAccountName: {{ $.Release.Name }}-{{ $name }}
+      automountServiceAccountToken: false
+      {{- end }}
       securityContext: {{- toYaml $.Values.podSecurity | nindent 8 }}
       topologySpreadConstraints:
         - maxSkew: 1
@@ -48,6 +54,9 @@ spec:
             - name: SENTINEL_CHECKPOINT_DSN
               valueFrom: { secretKeyRef: { name: {{ include "sentinel.secretName" $ }}, key: checkpointDsn, optional: true } }
             {{- end }}
+            {{- if $c.guardIdentity }}
+            - { name: SENTINEL_GUARD_TOKEN_FILE, value: /var/run/sentinel/guard/token }
+            {{- end }}
             {{- range $k, $v := $c.env }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
             {{- end }}
@@ -56,8 +65,29 @@ spec:
           livenessProbe: { httpGet: { path: {{ $c.probes.liveness }}, port: http }, periodSeconds: 10, failureThreshold: 6 }
           startupProbe: { httpGet: { path: {{ $c.probes.liveness }}, port: http }, periodSeconds: 5, failureThreshold: 60 }
           resources: {{- toYaml $c.resources | nindent 12 }}
-          volumeMounts: [{ name: tmp, mountPath: /tmp }]
-      volumes: [{ name: tmp, emptyDir: {} }]
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            {{- if $c.guardIdentity }}
+            - { name: guard-token, mountPath: /var/run/sentinel/guard, readOnly: true }
+            {{- end }}
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        {{- if $c.guardIdentity }}
+        # Short-lived, auto-rotated token (no API access granted by it beyond what RBAC gives the SA: none).
+        - name: guard-token
+          projected:
+            sources:
+              - serviceAccountToken: { path: token, expirationSeconds: 3600 }
+        {{- end }}
+{{- if $c.guardIdentity }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+  labels: {{- include "sentinel.labels" $ | nindent 4 }}
+automountServiceAccountToken: false
+{{- end }}
 {{- if $c.service }}
 ---
 apiVersion: v1

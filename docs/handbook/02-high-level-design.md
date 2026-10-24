@@ -44,7 +44,7 @@
 
 *Figure 2.2: System context: who uses Sentinel and what it talks to*
 
-Sentinel reads production telemetry, is woken by the alerting system, proposes actions, and, **after a human approves**, executes that one action through the team's deploy tooling and checks that it worked. The agent never holds standing deploy credentials: each approval mints a single-use capability for exactly the approved operation (ADR-0008).
+Sentinel reads production telemetry, is woken by the alerting system, proposes actions, and, **after a human approves**, executes that one action through the team's deploy tooling and checks that it worked. The agent never holds standing deploy credentials: each approval, recorded in **Sentinel Guard**, yields a single-use capability for exactly the approved operation and parameters (ADR-0008, ADR-0011).
 
 ## 3. Container view
 
@@ -60,7 +60,8 @@ Sentinel reads production telemetry, is woken by the alerting system, proposes a
 | **agent-service** | The incident workflow: investigation, triage, RCA, guardrails, approval pause, **execution, verification**, postmortem with timeline | `langgraph` schema (checkpoints) | MCP servers, LLM, Postgres |
 | **ingestion-service** | Turns uploaded documents into searchable chunks; runs DB migrations (as a job in Kubernetes) | `knowledge_documents`, `knowledge_chunks`, schema | Kafka (consume, DLT), Postgres |
 | **mcp-observability** | Read-only telemetry tools over MCP, plus `probe_service` for verification | — | observed services |
-| **mcp-remediation** | Deploy-tool adapter: `rollback`, `restart`, `increase_pool`, `failover`, `scale_out`, each gated by a capability | replay store (Redis jti set) | ops APIs of the services, Redis |
+| **mcp-remediation** | Deploy-tool adapter: `rollback`, `restart`, `increase_pool`, `failover`, `scale_out`, each gated by a capability from Sentinel Guard | — | ops APIs of the services, Sentinel Guard (verify, redeem) |
+| **Sentinel Guard** (Phase 10/11) | Approvals and single-use capabilities: the agent proposes, reviewers' decisions are recorded (via the gateway), the adapter redeems; signed audit chain; also guards agents' Kubernetes changes (chapter 17) | `ActionRequest` objects, ConfigMaps (Kubernetes) or memory (local) | Kubernetes API, Prometheus (preconditions) |
 | **Prometheus + Alertmanager** | Alert rules on service metrics; webhook to the gateway with an integration token | — | services (scrape), gateway |
 | **chaos-lab** | Demo services with injectable faults and an ops API (`/ops/*`); `loadgen` keeps traffic flowing so faults show up in metrics | — | each other |
 
@@ -137,14 +138,14 @@ Resumption can happen on any agent replica, hours later: the thread `tenant:inci
 *Figure 2.12: Who issues which token, and who can only verify it*
 
 - **Users** sign in at the company IdP (Keycloak in dev) through the console's OIDC code flow with PKCE. The `tenant_id` claim (an attribute only IdP admins can change) is the only source of tenant identity; roles (`tenant-admin`) come from the IdP too. HS256 dev tokens exist only where the dev issuer is enabled (scripts, CI, kind).
-- **Services** use tokens minted **only by the gateway**: ES256 with a key ring, verified everywhere else against the public JWKS. Verifiers hold no key that can mint.
+- **Services** use tokens minted **only by the gateway** (ES256, key ring, verified everywhere else against the public JWKS), except capabilities, which **only Sentinel Guard** issues (its own ES256 key). Verifiers hold no key that can mint.
 
   | Credential | Audience | Scope / claims | Accepted by | Lifetime |
   |---|---|---|---|---|
   | Tool token | `sentinel-mcp` | `knowledge:read telemetry:read` | gateway `/mcp`, mcp-observability | 15 min |
   | Agent-call token | `sentinel-agent` | `tenant_id` (must match the request) | agent API | 60 s, per request |
   | Integration token | `sentinel-alerts` | `alerts:write` | alerts webhook, while not revoked | ≤ 90 days, revocable |
-  | Capability | `sentinel-remediation` | `remediation:execute` + action/target/incident | remediation adapter only, once | 5 min |
+  | Capability (from **Sentinel Guard**, Phase 11) | `sentinel-action` | action/target/tenant + approved parameters + approver | remediation adapter only, redeemed once at the guard | until the approval expires (10 min) |
 
   The gateway's general API rejects all service audiences; the decoder pins one algorithm per issuer.
 - **Every hop is authenticated:** browser → BFF (session cookie) → gateway (user token) → agent (agent-call token) → MCP servers (tool token) / adapter (capability). NetworkPolicy is a second layer, not the only one.
@@ -189,7 +190,7 @@ Every intervention is recorded and measured (ADR-0006, chapter 11).
 | Kafka | Upload → 503 (never silently dropped) |
 | Agent | Gateway marks the incident `FAILED`; 503 to the caller |
 | Agent pod mid-incident | Resume from Postgres checkpoint on any replica |
-| Remediation adapter, or its Redis replay store | **Execution refused (fails closed)** → `REMEDIATION_FAILED`, the incident stays open for a human; investigation is unaffected |
+| Remediation adapter, or Sentinel Guard | **Execution refused (fails closed)**. Guard down at approval → the decision isn't recorded, nothing resumes (503, seen live); guard down at execution → `REMEDIATION_FAILED`; the incident stays open for a human; investigation is unaffected |
 | Gateway (for Alertmanager) | Alertmanager retries the webhook; delivery resumes when the gateway is back (seen live) |
 | Verification probe | Counted as unhealthy → `REMEDIATION_FAILED`, never a false `RESOLVED` |
 | IdP (Keycloak) | No new sign-ins. Existing sessions keep working until their access token expires; refresh then fails → sign in again. The gateway keeps verifying with cached IdP keys |
@@ -218,6 +219,7 @@ Every intervention is recorded and measured (ADR-0006, chapter 11).
 | [0008](../adr/0008-closed-loop-capabilities-and-alert-intake.md) | Close the loop: alert intake, capability-gated execution, verified recovery |
 | [0009](../adr/0009-zero-trust-identity.md) | Zero-trust identity: asymmetric service tokens, OIDC users, every hop authenticated, checkpoint RLS |
 | [0010](../adr/0010-sentinel-guard.md) | Sentinel Guard: the safe-action core as a Kubernetes-native Go service any agent is held to; state in the API server; approvals through RBAC |
+| [0011](../adr/0011-copilot-approvals-through-the-guard.md) | The copilot's approvals and capabilities go through Sentinel Guard (agent proposes, gateway decides as a delegate, adapter redeems) |
 
 ### 6.7 Sentinel Guard (v2)
-From Phase 10, the approval → single-use → audit core also ships on its own as **Sentinel Guard** (`guard/`, [chapter 17](17-lld-sentinel-guard.md)). It enforces at the Kubernetes API for any agent identity: an admission webhook that only agents are sent to, approvals as `ActionRequest` objects decided with `kubectl sentinel`, and a signed hash-chained audit. It also serves an HTTP action API for agents outside Kubernetes. The incident copilot described in this chapter is unchanged; moving its approvals onto the guard is on the roadmap (chapter 16).
+From Phase 10, the approval → single-use → audit core also ships on its own as **Sentinel Guard** (`guard/`, [chapter 17](17-lld-sentinel-guard.md)). It enforces at the Kubernetes API for any agent identity: an admission webhook that only agents are sent to, approvals as `ActionRequest` objects decided with `kubectl sentinel`, and a signed hash-chained audit. It also serves an HTTP action API for agents outside Kubernetes. Since Phase 11 the incident copilot itself runs on the guard ([ADR-0011](../adr/0011-copilot-approvals-through-the-guard.md)): the agent registers each proposal, the gateway records reviewers' decisions as a delegate, and the adapter redeems the capability the guard issued.

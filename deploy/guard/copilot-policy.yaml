@@ -1,0 +1,19 @@
+# Sentinel Guard policy for the incident copilot (scripts/dev-local.sh, docker compose).
+# The Helm chart renders the same settings from its values (deploy/helm/sentinel/values.yaml, guard:).
+#
+# The agent proposes each remediation; a reviewer approves it in the console, and the gateway records
+# that decision here as a delegate ("alice@acme via sentinel-gateway"). The adapter then redeems the
+# single-use capability the guard issued to the agent.
+agents:
+  users: [sentinel-agent]          # the agent's identity: it can never approve anything
+delegates:
+  users: [sentinel-gateway]        # may record a decision for a person it authenticated (memory mode adds it too)
+defaults: {risk: medium, autonomy: approve}
+pendingTTL: 72h                    # an incident can wait days for a human...
+approvalTTL: 10m                   # ...but an approval must be used within minutes
+actions:
+  rollback:      {risk: medium}
+  restart:       {risk: medium}
+  failover:      {risk: medium}
+  increase_pool: {risk: low}
+  scale_out:     {risk: low}

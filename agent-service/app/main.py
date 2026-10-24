@@ -13,6 +13,7 @@ from .checkpoint import open_checkpointer
 from .graph import build_graph, run_config
 from . import telemetry
 from .auth import gateway_call
+from .guard_client import GuardClient
 from .models import Decision, Incident
 from .toolbox import McpToolBox
 
@@ -43,7 +44,7 @@ def _record(view: dict) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with open_checkpointer() as saver:
-        app.state.graph = build_graph(McpToolBox(), saver)
+        app.state.graph = build_graph(McpToolBox(), saver, GuardClient.from_env())
         yield
 
 
@@ -83,15 +84,14 @@ async def get_incident(request: Request, tenant_id: str, incident_id: str):
 
 @app.post("/tenants/{tenant_id}/incidents/{incident_id}/decision", dependencies=[Depends(gateway_call)])
 async def decide(request: Request, tenant_id: str, incident_id: str, decision: Decision,
-                 x_sentinel_remediation_token: Annotated[str | None, Header()] = None,
                  x_sentinel_tool_token: Annotated[str | None, Header()] = None):
     view = await _view(request, tenant_id, incident_id)
     if view.get("status") != "AWAITING_APPROVAL":
         raise HTTPException(409, f"incident is {view.get('status')}, not awaiting approval")
-    # Credentials minted by the gateway go into config only, never checkpointed: the capability for
-    # execution, the tool token for verification probes.
-    cfg = run_config(tenant_id, incident_id, tool_token=x_sentinel_tool_token,
-                     remediation_token=x_sentinel_remediation_token)
+    # The tool token (for verification probes) goes into config only, never checkpointed. The
+    # authority to execute is not passed here at all: the gateway has recorded the approval in
+    # Sentinel Guard, and the execute node collects the single-use capability from the guard.
+    cfg = run_config(tenant_id, incident_id, tool_token=x_sentinel_tool_token)
     await request.app.state.graph.ainvoke(Command(resume=decision.model_dump()), cfg)
     view = await _view(request, tenant_id, incident_id)
     RUNS.labels(view["status"]).inc()

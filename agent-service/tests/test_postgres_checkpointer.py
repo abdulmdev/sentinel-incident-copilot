@@ -14,7 +14,7 @@ from app.checkpoint import open_checkpointer
 from app.graph import build_graph, run_config
 from app.tenancy import CURRENT_TENANT
 
-from .fakes import FakeToolBox
+from .fakes import FakeGuard, FakeToolBox
 
 DSN = os.getenv("SENTINEL_TEST_PG_DSN")
 pytestmark = pytest.mark.skipif(not DSN, reason="set SENTINEL_TEST_PG_DSN to run against Postgres")
@@ -33,20 +33,22 @@ def fast(monkeypatch):
 
 async def test_incident_survives_restart_and_resumes_on_another_process():
     incident_id = f"durable-{uuid.uuid4()}"
+    guard = FakeGuard()  # outlives both "processes", as the real guard does
     CURRENT_TENANT.set("acme")  # what the authenticated request sets
 
     async with open_checkpointer(DSN) as saver:  # "process A" opens the incident, then dies
-        await build_graph(FakeToolBox(), saver).ainvoke({"incident": incident(incident_id)},
+        await build_graph(FakeToolBox(), saver, guard).ainvoke({"incident": incident(incident_id)},
                                                          run_config("acme", incident_id, "t"))
 
     async with open_checkpointer(DSN) as saver:  # "process B": fresh pool, fresh graph
-        g = build_graph(FakeToolBox(), saver)
+        g = build_graph(FakeToolBox(), saver, guard)
         before = (await g.aget_state(run_config("acme", incident_id))).values
         assert before["status"] == "AWAITING_APPROVAL"
         assert before["rca"]["remediation"]["action"] == "rollback"
 
+        guard.approve()  # the approval lives in the guard, not in this process: it survives the restart too
         await g.ainvoke(Command(resume={"approved": True, "reviewer": "oncall@acme", "note": None}),
-                        run_config("acme", incident_id, "t", remediation_token="capability"))
+                        run_config("acme", incident_id, "t"))
         assert (await g.aget_state(run_config("acme", incident_id))).values["status"] == "RESOLVED"
 
 

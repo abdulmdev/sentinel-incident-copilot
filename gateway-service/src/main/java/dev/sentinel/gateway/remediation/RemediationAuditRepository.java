@@ -12,7 +12,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class RemediationAuditRepository {
 
     public record Entry(UUID incidentId, String action, String target, String approvedBy, String capabilityJti,
-                        boolean executed, Boolean verified, String outcome, String error) {
+                        String guardRequest, boolean executed, Boolean verified, String outcome, String error) {
     }
 
     private final JdbcClient jdbc;
@@ -28,10 +28,10 @@ public class RemediationAuditRepository {
             bind(tenant);
             jdbc.sql("""
                     INSERT INTO remediation_audit (tenant_id, incident_id, action, target, approved_by, capability_jti,
-                                                   executed, verified, outcome, error)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""")
+                                                   guard_request, executed, verified, outcome, error)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""")
                     .params(tenant, e.incidentId(), e.action(), e.target(), e.approvedBy(), e.capabilityJti(),
-                            e.executed(), e.verified(), e.outcome(), e.error())
+                            e.guardRequest(), e.executed(), e.verified(), e.outcome(), e.error())
                     .update();
         });
     }
@@ -40,12 +40,13 @@ public class RemediationAuditRepository {
         return tx.execute(s -> {
             bind(tenant);
             return jdbc.sql("""
-                    SELECT incident_id, action, target, approved_by, capability_jti, executed, verified, outcome, error
+                    SELECT incident_id, action, target, approved_by, capability_jti, guard_request, executed, verified,
+                           outcome, error
                     FROM remediation_audit WHERE tenant_id = ? AND incident_id = ? ORDER BY id""")
                     .params(tenant, incidentId)
                     .query((rs, n) -> new Entry(rs.getObject("incident_id", UUID.class), rs.getString("action"),
                             rs.getString("target"), rs.getString("approved_by"), rs.getString("capability_jti"),
-                            rs.getBoolean("executed"), (Boolean) rs.getObject("verified"), rs.getString("outcome"),
+                            rs.getString("guard_request"), rs.getBoolean("executed"), (Boolean) rs.getObject("verified"), rs.getString("outcome"),
                             rs.getString("error")))
                     .list();
         });

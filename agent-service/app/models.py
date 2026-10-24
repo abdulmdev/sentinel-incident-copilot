@@ -73,6 +73,7 @@ class IncidentState(TypedDict, total=False):
     postmortem: str
     llm_calls: Annotated[list[dict], operator.add]
     guardrail_events: Annotated[list[dict], operator.add]
+    approval: dict       # the Sentinel Guard request for the proposed action: {request, verdict, message | error}
     execution: dict      # what the remediation server did (or why it didn't)
     verification: dict   # post-remediation probes: healthy or not
     timeline: dict       # proposed_at, decided_at, executed_at, verified_at (ISO) + derived durations

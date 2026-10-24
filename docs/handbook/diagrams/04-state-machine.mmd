@@ -5,11 +5,12 @@ stateDiagram-v2
   tools --> investigator: within budget
   tools --> triage: step cap reached
   triage --> rca
-  rca --> approval: guardrails applied<br/>status AWAITING_APPROVAL
+  rca --> request_approval: guardrails applied<br/>status AWAITING_APPROVAL
+  request_approval --> approval: proposal registered in Sentinel Guard<br/>(not for escalate, guard down → recorded error)
   approval --> execute: approved action (REMEDIATING)
   approval --> postmortem: rejected or escalate
-  execute --> verify: executed with the capability
-  execute --> postmortem: no/refused capability, adapter error
+  execute --> verify: capability from the guard, executed once
+  execute --> postmortem: not approved in the guard, guard down,<br/>refused capability, adapter error
   verify --> postmortem: RESOLVED or REMEDIATION_FAILED
   postmortem --> [*]
   note right of approval

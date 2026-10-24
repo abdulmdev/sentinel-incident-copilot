@@ -26,7 +26,7 @@ Spring Boot 4.0.8 (Java 21 target, virtual threads on), Spring AI 2.0.1. Package
 | `tenant` | `Tenants`, `RateLimiter`, `TenantRateLimiter`, `RedisRateLimiter`, `RateLimiterConfig`, `TenantRateLimitFilter` | Tenant extraction and rate limiting |
 | `incident` | `IncidentController`, `IncidentService`, `IncidentRequests`, `IncidentRepository`, `AgentClient` | Incident API, lifecycle (record → investigate → decide), system of record, agent HTTP client |
 | `alert` | `AlertController`, `AlertService`, `AlertLinkRepository`, `AlertmanagerWebhook` | Alertmanager webhook; dedupe/correlation; alert ↔ incident links |
-| `remediation` | `RemediationTokens`, `RemediationAuditRepository` | Capability minting at approval; append-only audit |
+| `remediation` | `GuardClient`, `RemediationAuditRepository` | Records reviewers' decisions in Sentinel Guard (Phase 11; the gateway mints no capabilities); append-only audit |
 | `knowledge` | `KnowledgeController`, `KnowledgeSearch`, `ReciprocalRankFusion`, `SearchHit`, `TenantDocumentRetriever` | Upload, hybrid search, RAG retriever |
 | `ask` | `AskController`, `SemanticCache` | `/ask` and its cache |
 | `mcp` | `RunbookMcpServer`, `ToolTokens` | MCP knowledge tool; tool-token minting |
@@ -56,7 +56,6 @@ Every service credential goes through it:
 | Class | Audience | TTL |
 |---|---|---|
 | `ToolTokens` | `sentinel-mcp` | 15 min |
-| `RemediationTokens` | `sentinel-remediation` | 5 min |
 | `AgentTokens` | `sentinel-agent` | 60 s |
 | `IntegrationController` | `sentinel-alerts` | 1–90 days |
 
@@ -98,7 +97,7 @@ Parses the token **without** trusting it, only to read `iss` and `alg`, then del
   2. `/mcp`, `/mcp/**` → service token **and** `SCOPE_knowledge:read` **and** `aud` ∋ `sentinel-mcp`.
   3. `/api/v1/alerts/**` → service token **and** `SCOPE_alerts:write` **and** `aud` ∋ `sentinel-alerts` **and** `IntegrationTokenRepository.useIfActive(tenant, jti)` (issued, not revoked, not expired; stamps `last_used_at`).
   4. `/api/v1/integrations/**` → user **and** `ROLE_tenant-admin`.
-  5. Any other path → user, whose `aud` contains none of the service audiences (`SERVICE_AUDIENCES` = `sentinel-mcp`, `sentinel-alerts`, `sentinel-remediation`, `sentinel-agent`).
+  5. Any other path → user, whose `aud` contains none of the service audiences (`SERVICE_AUDIENCES` = `sentinel-mcp`, `sentinel-alerts`, `sentinel-agent`).
      *Bug history:* `getAudience()` returns `null` for user tokens (no `aud`). The first version NPE'd on every request; caught by tests in Phase 3.
 - The rate-limit filter is added **after** `BearerTokenAuthenticationFilter` (so the tenant is known) and before authorization. A rejected (403) request still consumes a token. Buckets are keyed by credential type: `tenant` (people), `tenant:agent` (tool tokens), `tenant:alerts` (integration tokens), so an alert storm can't starve the on-call engineer's console.
 
@@ -159,15 +158,15 @@ Returns the `tenant_id` claim; a missing or blank claim throws `AccessDeniedExce
 
 ### 4.2 `IncidentService.decide(tenant, id, approved, note, reviewer)`
 
-![Decision: capability only for an approved executable action; audit when something executed; release alerts when final](images/03-decide.png)
+![Decision: recorded in Sentinel Guard before the agent resumes; audit when something executed; release alerts when final](images/03-decide.png)
 
-*Figure 3.6: Decision: capability only for an approved executable action; audit when something executed; release alerts when final*
+*Figure 3.6: Decision: recorded in Sentinel Guard before the agent resumes; audit when something executed; release alerts when final*
 
-1. `agent.get(tenant, id)` → the proposed `rca.remediation.{action, target}`. The capability is bound to what the human saw, read from the agent's checkpoint, not from the request.
-2. If `approved` and `action ≠ escalate` → `remediationTokens.mint(tenant, id, action, target, reviewer)`. Otherwise no capability.
-3. `agent.decide(tenant, id, {approved, reviewer, note}, capability?)` (header `X-Sentinel-Remediation-Token`). This call spans execution and verification: up to about a minute, within the 120 s read timeout.
+1. `agent.get(tenant, id)` → the proposed `rca.remediation.{action, target}` and `approval.request`: the Sentinel Guard request the agent registered for exactly that proposal (none for `escalate`). What is approved is what the human saw, read from the agent's checkpoint, not from the request.
+2. If there is a guard request → `guard.decide(request, approved, reviewer, note)` (Phase 11). The gateway records the decision **as a delegate**: the guard stores the reviewer as the approver, via the gateway. Rejections are recorded too, so that request can never be approved later. If the guard refuses (expired, already decided, unreachable), a `GuardException` maps to that status (409/403/503) and **nothing is resumed**.
+3. `agent.decide(tenant, id, {approved, reviewer, note}, toolToken)`. No authority to execute travels here: the agent collects its single-use capability from the guard. This call spans execution and verification: up to about a minute, within the 120 s read timeout.
 4. `incidents.update(tenant, id, view, reviewer)`, which mirrors status, execution, verification, timeline and `time_to_mitigate_s`.
-5. If the view has `execution` → `remediation_audit` row `{action, target, approved_by, capability_jti, executed, verified, outcome, error}`.
+5. If the view has `execution` → `remediation_audit` row `{action, target, approved_by, capability_jti, guard_request, executed, verified, outcome, error}` (the jti comes from the execution result).
 6. If the status is final (`RESOLVED`, `CLOSED_NO_ACTION`, `FAILED`) → `alertLinks.deactivate`, so a recurrence of the alert opens a new incident. `REMEDIATION_FAILED` and `ESCALATED` keep the alert linked: the problem isn't over.
 
 ### 4.3 Background investigations
@@ -177,7 +176,7 @@ Alert-opened incidents are investigated on `ContextExecutorService.wrap(newVirtu
 - `RestClient` on a JDK `HttpClient`, **forced to HTTP/1.1** (the JDK client otherwise attempts an h2c upgrade that uvicorn rejects; found in Phase 1), connect timeout 2 s, read timeout 120 s (LLM RCA can be slow).
 - `open` sends the tool token as header **`X-Sentinel-Tool-Token`**, not in the body, so the agent can't checkpoint it.
 - `open` and `get` are `@Retryable(includes = ResourceAccessException, maxRetries = 2, delay = 200 ms, multiplier = 2)`. Network failures only. Opening is idempotent because the agent returns 409 for an existing `tenant:id`.
-- `decide` is **not** retried: a state change the caller should see fail and confirm again. It forwards the capability as `X-Sentinel-Remediation-Token` when present, plus a tool token for the verification probes.
+- `decide` is **not** retried: a state change the caller should see fail and confirm again. It sends a tool token for the verification probes; since Phase 11 nothing that authorizes execution.
 - **Every call carries `Authorization: Bearer <agent-call token>`** (Phase 8), minted per request for the call's tenant (`AgentTokens`, 60 s).
 - Built from the auto-configured `RestClient.Builder`, so Micrometer observation propagates W3C `traceparent` (verified by `TracePropagationTest`).
 
@@ -239,16 +238,15 @@ Per alert:
 
 ## 4B. Remediation
 
-### 4B.1 `RemediationTokens`
-Minted by `ServiceTokens` (ES256, gateway `iss`, `kid`). Claims:
-- `sub = agent:<incidentId>`, `aud = [sentinel-remediation]`, `jti = UUID`;
-- `tenant_id`, `scope = remediation:execute`, `incident_id`, `action`, `target`, `approved_by`;
-- `iat`, `exp = iat + 5 min`.
-
-Returns `Capability(token, jti)`; the jti goes into the audit row. The gateway never accepts this audience on its own API.
+### 4B.1 `GuardClient` (Phase 11)
+The gateway no longer mints capabilities (`RemediationTokens` was removed; [ADR-0011](../adr/0011-copilot-approvals-through-the-guard.md)).
+- `decide(requestId, approve, approver, note)` → `POST {sentinel.guard.url}/v1/actions/{id}/approve|deny` with `{approver, note}`.
+- It authenticates as **the gateway itself**: `SENTINEL_GUARD_TOKEN_FILE` (a projected ServiceAccount token in Kubernetes, re-read on every call because the kubelet rotates it) or `SENTINEL_GUARD_TOKEN` (a static token for a single-process guard). The guard accepts decisions over HTTP only from identities in its policy's `delegates`.
+- HTTP/1.1 JDK client, connect timeout 2 s, read timeout 10 s, not retried.
+- Errors become `GuardException(status, message)`: the guard's 409/403 pass through; a network failure is 503 "unavailable, so nothing was approved or resumed". `ApiErrors` returns them to the console as "Sentinel Guard: …".
 
 ### 4B.2 `RemediationAuditRepository`
-Append-only `remediation_audit` (RLS): `record(tenant, Entry)` and `forIncident(tenant, id)`. Joined with the adapter's JSON audit line by `capability_jti`.
+Append-only `remediation_audit` (RLS): `record(tenant, Entry)` and `forIncident(tenant, id)`. Each row links the **guard request** (`guard_request`, V8; its signed audit chain holds who approved and when it ran) and the **capability jti**, which also appears in the adapter's JSON audit line.
 
 ## 4C. Integrations (`/api/v1/integrations`, Phase 8)
 - `IntegrationController` (users with `ROLE_tenant-admin`):

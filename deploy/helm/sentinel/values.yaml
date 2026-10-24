@@ -65,6 +65,7 @@ podSecurity: &podSecurity
 components:
   gateway:
     secrets: [signingKeys, dbAppPassword, anthropicApiKey]   # the only holder of signing keys
+    guardIdentity: true                         # records reviewers' decisions in Sentinel Guard (a delegate)
     port: 8080
     replicas: 2
     probes: { liveness: /actuator/health/liveness, readiness: /actuator/health/readiness }
@@ -81,6 +82,7 @@ components:
     resources: { requests: { cpu: 250m, memory: 768Mi }, limits: { memory: 1536Mi } }
   agent:
     secrets: [anthropicApiKey]                  # never signingKeys or jwtSecret (see templates/components.yaml)
+    guardIdentity: true                         # proposes actions to Sentinel Guard as its own ServiceAccount
     port: 8000
     replicas: 2
     probes: { liveness: /healthz, readiness: /healthz }
@@ -96,9 +98,9 @@ components:
     resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
     service: { type: ClusterIP }
   mcp-remediation:              # deploy-tool adapter: runs approved actions with a single-use capability
-    secrets: []                                 # verifies capabilities with the gateway's public keys
+    secrets: []                                 # verifies capabilities with the guard's public key
     port: 8300
-    replicas: 2                   # stateless: the replay store (Redis) is shared, so replicas can't double-spend
+    replicas: 2                   # stateless: the guard enforces single use, so replicas can't double-spend
     probes: { liveness: /healthz, readiness: /healthz }
     resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
     service: { type: ClusterIP }
@@ -118,3 +120,33 @@ remediation:
 chaosLab:
   enabled: false
   services: [checkout, inventory]
+
+# Sentinel Guard (subchart, deploy/helm/sentinel-guard): approvals and single-use capabilities.
+# Identities assume the release "sentinel" in namespace "sentinel" (scripts/kind-up.sh, the AWS runbook);
+# adjust both lists if you install elsewhere.
+sentinel-guard:
+  enabled: true
+  api: { plainHTTP: true, port: 8080 }          # the agent, gateway and adapter call it in-cluster
+  agents:
+    groups: ["system:serviceaccounts:agents"]   # still guards any agent in the "agents" namespace
+    users: ["system:serviceaccount:sentinel:sentinel-agent"]   # the copilot's agent can never approve
+  delegates:
+    users: ["system:serviceaccount:sentinel:sentinel-gateway"] # records decisions for console users
+  policy:
+    defaults: { risk: medium, autonomy: approve }
+    pendingTTL: 72h                             # incidents can wait days for a human
+    approvalTTL: 10m
+    protectedNamespaces: [kube-system, kube-public, kube-node-lease]
+    actions:
+      rollback: { risk: medium }
+      restart: { risk: medium }
+      failover: { risk: medium }
+      increase_pool: { risk: low }
+      scale_out: { risk: low, minReplicas: 1, maxReplicas: 20 }
+      scale: { risk: medium, minReplicas: 1, maxReplicas: 20 }
+      set-image: { risk: high }
+      rollout: { risk: high }
+      update: { risk: high }
+      delete: { risk: high }
+      create: { risk: low, autonomy: observe }
+

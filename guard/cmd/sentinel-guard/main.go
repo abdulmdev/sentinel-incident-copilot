@@ -66,6 +66,7 @@ func main() {
 	validating := flag.String("validating-webhook", env("SENTINEL_GUARD_VALIDATING_WEBHOOK", "sentinel-guard"), "ValidatingWebhookConfiguration to keep the CA bundle on")
 	mutating := flag.String("mutating-webhook", env("SENTINEL_GUARD_MUTATING_WEBHOOK", "sentinel-guard"), "MutatingWebhookConfiguration to keep the CA bundle on")
 	issuer := flag.String("issuer", env("SENTINEL_GUARD_ISSUER", "sentinel-guard"), "issuer of capabilities")
+	apiAddr := flag.String("api-addr", env("SENTINEL_GUARD_API_ADDR", ""), "kubernetes mode: also serve the action API (no webhooks) over plain HTTP here, for in-cluster clients")
 	showVersion := flag.Bool("version", false, "print the version")
 	flag.Parse()
 	if *showVersion {
@@ -73,13 +74,13 @@ func main() {
 		return
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if err := run(log, *mode, *policyPath, *addr, *metricsAddr, *namespace, *service, *validating, *mutating, *issuer); err != nil {
+	if err := run(log, *mode, *policyPath, *addr, *apiAddr, *metricsAddr, *namespace, *service, *validating, *mutating, *issuer); err != nil {
 		log.Error("sentinel-guard stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, mode, policyPath, addr, metricsAddr, ns, service, validating, mutating, issuer string) error {
+func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, service, validating, mutating, issuer string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -200,8 +201,9 @@ func run(log *slog.Logger, mode, policyPath, addr, metricsAddr, ns, service, val
 		if keyPEM, err = guard.GenerateKeyPEM(); err != nil {
 			return err
 		}
-		agents, admin := memoryTokens(log)
+		agents, admin, delegates := memoryTokens(log)
 		srv.Agents, srv.AdminToken = agents, admin
+		policy.Delegates.Users = append(policy.Delegates.Users, delegates...)
 		if addr == "" {
 			addr = ":8080"
 		}
@@ -232,7 +234,13 @@ func run(log *slog.Logger, mode, policyPath, addr, metricsAddr, ns, service, val
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), TLSConfig: tlsConfig,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second}
 	metricsSrv := &http.Server{Addr: metricsAddr, Handler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}), ReadHeaderTimeout: 5 * time.Second}
-	errs := make(chan error, 2)
+	errs := make(chan error, 3)
+	var apiSrv *http.Server
+	if apiAddr != "" && tlsConfig != nil {
+		apiSrv = &http.Server{Addr: apiAddr, Handler: srv.APIHandler(), ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second}
+		go func() { errs <- apiSrv.ListenAndServe() }()
+	}
 	go func() {
 		var err error
 		if tlsConfig != nil {
@@ -282,16 +290,28 @@ func run(log *slog.Logger, mode, policyPath, addr, metricsAddr, ns, service, val
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = metricsSrv.Shutdown(shutdown)
+	if apiSrv != nil {
+		_ = apiSrv.Shutdown(shutdown)
+	}
 	return httpSrv.Shutdown(shutdown)
 }
 
 // memoryTokens reads agent and admin tokens from the environment, or generates them and prints
 // them once (single-process mode is for trying the guard out).
-func memoryTokens(log *slog.Logger) (server.StaticTokens, string) {
+func memoryTokens(log *slog.Logger) (server.StaticTokens, string, []string) {
 	agents := server.StaticTokens{}
 	for _, pair := range strings.Split(os.Getenv("SENTINEL_GUARD_AGENT_TOKENS"), ",") {
 		if name, token, ok := strings.Cut(strings.TrimSpace(pair), "="); ok && name != "" && token != "" {
 			agents[token] = name
+		}
+	}
+	// Delegates (e.g. Sentinel's gateway) authenticate with their own tokens and may record
+	// decisions on behalf of the people they signed in.
+	var delegates []string
+	for _, pair := range strings.Split(os.Getenv("SENTINEL_GUARD_DELEGATE_TOKENS"), ",") {
+		if name, token, ok := strings.Cut(strings.TrimSpace(pair), "="); ok && name != "" && token != "" {
+			agents[token] = name
+			delegates = append(delegates, name)
 		}
 	}
 	admin := os.Getenv("SENTINEL_GUARD_ADMIN_TOKEN")
@@ -304,8 +324,8 @@ func memoryTokens(log *slog.Logger) (server.StaticTokens, string) {
 		admin = randomToken()
 		fmt.Fprintf(os.Stderr, "    approver (admin):   %s\n  Set SENTINEL_GUARD_AGENT_TOKENS=name=token,... and SENTINEL_GUARD_ADMIN_TOKEN to choose your own.\n\n", admin)
 	}
-	log.Info("memory mode: state is kept in this process only", "agents", len(agents))
-	return agents, admin
+	log.Info("memory mode: state is kept in this process only", "tokens", len(agents), "delegates", delegates)
+	return agents, admin, delegates
 }
 
 func randomToken() string {

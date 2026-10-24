@@ -10,19 +10,20 @@ CLUSTER=sentinel; NS=sentinel
 if [ "${1:-}" = "--down" ]; then kind delete cluster --name $CLUSTER; exit 0; fi
 
 kind get clusters | grep -qx $CLUSTER || kind create cluster --config deploy/kind/cluster.yaml --wait 120s
-docker image inspect sentinel/gateway:dev >/dev/null 2>&1 || scripts/build-images.sh
+docker image inspect sentinel/guard:dev >/dev/null 2>&1 || scripts/build-images.sh
 
 echo "Loading our images into the node (no registry needed)"
 # Third-party images (postgres, kafka, redis) are pulled by the node itself: kind can't import
 # multi-platform images from Docker Desktop's store ("content digest ... not found").
 for img in sentinel/gateway:dev sentinel/ingestion:dev sentinel/agent:dev sentinel/mcp-observability:dev \
-           sentinel/mcp-remediation:dev sentinel/chaos-lab:dev sentinel/web:dev; do
+           sentinel/mcp-remediation:dev sentinel/chaos-lab:dev sentinel/web:dev sentinel/guard:dev; do
   kind load docker-image --name $CLUSTER "$img" >/dev/null
 done
 
 kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 echo "Installing dependencies (dev only: Postgres+pgvector, Kafka, Redis)"
 helm upgrade --install sentinel-deps deploy/helm/sentinel-deps -n $NS --wait --timeout 5m >/dev/null
+helm dependency build deploy/helm/sentinel >/dev/null   # Sentinel Guard (subchart)
 helm status sentinel -n $NS >/dev/null 2>&1 && UPGRADE=1 || UPGRADE=0
 echo "Installing Sentinel (migration hook Job runs first)"
 helm upgrade --install sentinel deploy/helm/sentinel -n $NS -f deploy/helm/sentinel/values-kind.yaml \

@@ -513,15 +513,19 @@ func CanDecide(r *Request, decider string, isAgent bool, now time.Time) error {
 	return nil
 }
 
-// Decide records a human decision (HTTP API) and applies it.
-func (e *Engine) Decide(ctx context.Context, id, decider string, groups []string, approve bool, note string) (*Request, error) {
+// Decide records a human decision (HTTP API) and applies it. via is the delegate that
+// authenticated the decider (empty when the decider called directly); neither may be the requester.
+func (e *Engine) Decide(ctx context.Context, id, decider string, groups []string, via string, approve bool, note string) (*Request, error) {
 	now := e.Now()
 	isAgent := e.Policy().IsAgent(decider, groups)
 	if _, err := e.Store.Update(ctx, id, func(r *Request) error {
 		if err := CanDecide(r, decider, isAgent, now); err != nil {
 			return err
 		}
-		r.Decision, r.DecidedBy, r.DecisionNote, r.DecidedAt = "deny", decider, note, &now
+		if via != "" && via == r.Agent {
+			return fmt.Errorf("%w: the requesting identity cannot decide its own request", ErrForbidden)
+		}
+		r.Decision, r.DecidedBy, r.DecidedVia, r.DecisionNote, r.DecidedAt = "deny", decider, via, note, &now
 		if approve {
 			r.Decision = "approve"
 		}
@@ -552,7 +556,11 @@ func (e *Engine) finalize(ctx context.Context, r *Request) (*Request, error) {
 	if r.Decision == "approve" {
 		typ = EventApproved
 	}
-	r2, err := e.transition(ctx, r, typ, r.DecidedBy, r.DecisionNote, func(x *Request) error {
+	detail := r.DecisionNote
+	if r.DecidedVia != "" {
+		detail = strings.TrimSpace(detail + " [via " + r.DecidedVia + "]")
+	}
+	r2, err := e.transition(ctx, r, typ, r.DecidedBy, detail, func(x *Request) error {
 		if x.Phase != PhasePending {
 			return errStale
 		}

@@ -1,9 +1,11 @@
 package dev.sentinel.gateway.incident;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,8 +18,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.Map;
 
 import dev.sentinel.gateway.alert.AlertLinkRepository;
+import dev.sentinel.gateway.remediation.GuardClient;
 import dev.sentinel.gateway.remediation.RemediationAuditRepository;
-import dev.sentinel.gateway.remediation.RemediationTokens;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -50,16 +52,15 @@ class IncidentControllerTest {
     AlertLinkRepository alertLinks;
 
     @MockitoBean
-    RemediationTokens remediationTokens;
+    GuardClient guard;
 
     private static final Map<String, Object> AWAITING_ROLLBACK = Map.of("status", "AWAITING_APPROVAL",
-            "rca", Map.of("remediation", Map.of("action", "rollback", "target", "checkout")));
+            "rca", Map.of("remediation", Map.of("action", "rollback", "target", "checkout")),
+            "approval", Map.of("request", "ar-1a2b3c4d-1", "verdict", "pending"));
 
     @org.junit.jupiter.api.BeforeEach
     void stubs() {
         when(agent.get(any(), any())).thenReturn(AWAITING_ROLLBACK);
-        when(remediationTokens.mint(any(), any(), any(), any(), any()))
-                .thenReturn(new RemediationTokens.Capability("cap-token", "jti-1"));
     }
 
     @Test
@@ -99,7 +100,7 @@ class IncidentControllerTest {
 
     @Test
     void reviewerIsTheAuthenticatedSubject() throws Exception {
-        when(agent.decide(eq("acme"), eq(ID), any(), any(), any())).thenReturn(Map.of("status", "RESOLVED"));
+        when(agent.decide(eq("acme"), eq(ID), any(), any())).thenReturn(Map.of("status", "RESOLVED"));
 
         mvc.perform(post("/api/v1/incidents/" + ID + "/decision")
                         .with(jwt().jwt(j -> j.subject("alice@acme").claim("tenant_id", "acme")))
@@ -107,7 +108,7 @@ class IncidentControllerTest {
                         .content("{\"approved\":true}"))
                 .andExpect(status().isOk());
 
-        verify(agent).decide(eq("acme"), eq(ID), argThat(d -> "alice@acme".equals(d.get("reviewer"))), any(), any());
+        verify(agent).decide(eq("acme"), eq(ID), argThat(d -> "alice@acme".equals(d.get("reviewer"))), any());
     }
 
     @Test
@@ -118,7 +119,7 @@ class IncidentControllerTest {
 
     @Test
     void agentConflictIsPassedThrough() throws Exception {
-        when(agent.decide(any(), any(), any(), any(), any()))
+        when(agent.decide(any(), any(), any(), any()))
                 .thenThrow(HttpClientErrorException.create(HttpStatus.CONFLICT, "Conflict", null, null, null));
 
         mvc.perform(post("/api/v1/incidents/" + ID + "/decision")
@@ -154,7 +155,7 @@ class IncidentControllerTest {
 
     @Test
     void decisionIsRecordedWithTheReviewer() throws Exception {
-        when(agent.decide(eq("acme"), eq(ID), any(), any(), any())).thenReturn(Map.of("status", "RESOLVED"));
+        when(agent.decide(eq("acme"), eq(ID), any(), any())).thenReturn(Map.of("status", "RESOLVED"));
 
         mvc.perform(post("/api/v1/incidents/" + ID + "/decision")
                         .with(jwt().jwt(j -> j.subject("bob@acme").claim("tenant_id", "acme")))
@@ -174,59 +175,75 @@ class IncidentControllerTest {
     }
 
     @Test
-    void approvalMintsACapabilityBoundToTheProposedActionAndPassesItToTheAgent() throws Exception {
-        when(agent.decide(any(), any(), any(), any(), any())).thenReturn(Map.of("status", "RESOLVED"));
+    void approvalIsRecordedInTheGuardForTheAgentsRequestBeforeTheAgentResumes() throws Exception {
+        when(agent.decide(any(), any(), any(), any())).thenReturn(Map.of("status", "RESOLVED"));
 
         decide("carol@acme", true);
 
-        verify(remediationTokens).mint("acme", ID, "rollback", "checkout", "carol@acme");
-        verify(agent).decide(eq("acme"), eq(ID), any(), eq("cap-token"), any());
+        var order = inOrder(guard, agent);
+        order.verify(guard).decide("ar-1a2b3c4d-1", true, "carol@acme", null);
+        order.verify(agent).decide(eq("acme"), eq(ID), any(), any());
     }
 
     @Test
-    void rejectionMintsNoCapability() throws Exception {
-        when(agent.decide(any(), any(), any(), any(), any())).thenReturn(Map.of("status", "CLOSED_NO_ACTION"));
+    void rejectionIsRecordedInTheGuardSoTheRequestCanNeverBeApprovedLater() throws Exception {
+        when(agent.decide(any(), any(), any(), any())).thenReturn(Map.of("status", "CLOSED_NO_ACTION"));
 
         decide("carol@acme", false);
 
-        verify(remediationTokens, never()).mint(any(), any(), any(), any(), any());
-        verify(agent).decide(eq("acme"), eq(ID), any(), isNull(), any());
+        verify(guard).decide("ar-1a2b3c4d-1", false, "carol@acme", null);
     }
 
     @Test
-    void approvedEscalationIsNotExecutableSoMintsNoCapability() throws Exception {
+    void approvedEscalationRegistersNothingInTheGuard() throws Exception {
         when(agent.get(any(), any())).thenReturn(Map.of("status", "AWAITING_APPROVAL",
-                "rca", Map.of("remediation", Map.of("action", "escalate", "target", "checkout"))));
-        when(agent.decide(any(), any(), any(), any(), any())).thenReturn(Map.of("status", "ESCALATED"));
+                "rca", Map.of("remediation", Map.of("action", "escalate", "target", "checkout")),
+                "approval", Map.of("message", "escalation: nothing to execute")));
+        when(agent.decide(any(), any(), any(), any())).thenReturn(Map.of("status", "ESCALATED"));
 
         decide("carol@acme", true);
 
-        verify(remediationTokens, never()).mint(any(), any(), any(), any(), any());
-        verify(agent).decide(eq("acme"), eq(ID), any(), isNull(), any());
+        verify(guard, never()).decide(any(), anyBoolean(), any(), any());
         verify(audit, never()).record(any(), any());
     }
 
     @Test
-    void executionIsAuditedWithTheCapabilityAndVerificationOutcome() throws Exception {
-        when(agent.decide(any(), any(), any(), any(), any())).thenReturn(Map.of("status", "RESOLVED",
-                "execution", Map.of("executed", true), "verification", Map.of("healthy", true)));
+    void aDecisionTheGuardRefusesResumesNothing() throws Exception {
+        when(guard.decide(any(), anyBoolean(), any(), any())).thenThrow(new GuardClient.GuardException(
+                HttpStatus.CONFLICT, "conflict: request ar-1a2b3c4d-1 has expired"));
+
+        mvc.perform(post("/api/v1/incidents/" + ID + "/decision")
+                        .with(jwt().jwt(j -> j.subject("carol@acme").claim("tenant_id", "acme")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"approved\":true}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("Sentinel Guard: conflict: request ar-1a2b3c4d-1 has expired"));
+        verify(agent, never()).decide(any(), any(), any(), any());
+    }
+
+    @Test
+    void executionIsAuditedWithTheGuardRequestCapabilityAndVerificationOutcome() throws Exception {
+        when(agent.decide(any(), any(), any(), any())).thenReturn(Map.of("status", "RESOLVED",
+                "execution", Map.of("executed", true, "capability_jti", "cap-9", "guard_request", "ar-1a2b3c4d-1"),
+                "verification", Map.of("healthy", true)));
 
         decide("carol@acme", true);
 
         verify(audit).record("acme", new RemediationAuditRepository.Entry(java.util.UUID.fromString(ID),
-                "rollback", "checkout", "carol@acme", "jti-1", true, true, "RESOLVED", null));
+                "rollback", "checkout", "carol@acme", "cap-9", "ar-1a2b3c4d-1", true, true, "RESOLVED", null));
         verify(alertLinks).deactivate("acme", java.util.UUID.fromString(ID)); // final: the alert may open a new incident
     }
 
     @Test
     void failedRemediationIsAuditedAndKeepsTheAlertLinked() throws Exception {
-        when(agent.decide(any(), any(), any(), any(), any())).thenReturn(Map.of("status", "REMEDIATION_FAILED",
+        when(agent.decide(any(), any(), any(), any())).thenReturn(Map.of("status", "REMEDIATION_FAILED",
                 "execution", Map.of("executed", false, "error", "capability already used")));
 
         decide("carol@acme", true);
 
         verify(audit).record(eq("acme"), argThat(e -> !e.executed() && e.verified() == null
-                && "capability already used".equals(e.error()) && "REMEDIATION_FAILED".equals(e.outcome())));
+                && "capability already used".equals(e.error()) && "REMEDIATION_FAILED".equals(e.outcome())
+                && "ar-1a2b3c4d-1".equals(e.guardRequest())));
         verify(alertLinks, never()).deactivate(any(), any());
     }
 

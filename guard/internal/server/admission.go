@@ -123,8 +123,8 @@ func (s *Server) admitApproval(w http.ResponseWriter, r *http.Request) bool {
 	if !sameRequest(before, after) {
 		return respond(w, review, deny("what was requested cannot be edited; only spec.decision (approve or deny) and spec.decisionNote"))
 	}
-	if before.Decision == after.Decision && before.DecisionNote == after.DecisionNote &&
-		before.DecidedBy == after.DecidedBy && reflect.DeepEqual(before.DecidedAt, after.DecidedAt) {
+	if before.Decision == after.Decision && before.DecisionNote == after.DecisionNote && before.DecidedBy == after.DecidedBy &&
+		before.DecidedVia == after.DecidedVia && reflect.DeepEqual(before.DecidedAt, after.DecidedAt) {
 		return respond(w, review, &admissionv1.AdmissionResponse{Allowed: true}) // labels, annotations...
 	}
 	if after.Decision != "approve" && after.Decision != "deny" {
@@ -136,6 +136,7 @@ func (s *Server) admitApproval(w http.ResponseWriter, r *http.Request) bool {
 	}
 	patch, _ := json.Marshal([]map[string]any{
 		{"op": "add", "path": "/spec/decidedBy", "value": user},
+		{"op": "add", "path": "/spec/decidedVia", "value": ""}, // a person deciding through the API server attests nothing for others
 		{"op": "add", "path": "/spec/decidedAt", "value": s.Engine.Now().UTC().Format(time.RFC3339Nano)},
 	})
 	pt := admissionv1.PatchTypeJSONPatch
@@ -147,7 +148,7 @@ func (s *Server) admitApproval(w http.ResponseWriter, r *http.Request) bool {
 func sameRequest(a, b *guard.Request) bool {
 	strip := func(r *guard.Request) string {
 		c := *r
-		c.Decision, c.DecidedBy, c.DecisionNote, c.DecidedAt = "", "", "", nil
+		c.Decision, c.DecidedBy, c.DecidedVia, c.DecisionNote, c.DecidedAt = "", "", "", "", nil
 		// status is written by the guard through the status subresource, never through this path
 		c.Phase, c.Reasons, c.Preconditions, c.ExecutedAt, c.CapabilityJTI, c.Audit, c.Exact, c.ExecGeneration = "", nil, nil, nil, "", nil, "", 0
 		c.ExpiresAt = time.Time{}

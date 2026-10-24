@@ -103,18 +103,21 @@ func ParseJWKS(b []byte) (map[string]*ecdsa.PublicKey, error) {
 
 // CapabilityClaims authorize exactly one approved action, once.
 type CapabilityClaims struct {
-	RequestID   string `json:"request_id"`
-	Action      string `json:"action"`
-	Target      string `json:"target"`
-	Fingerprint string `json:"fingerprint"`
-	ApprovedBy  string `json:"approved_by"`
+	RequestID   string            `json:"request_id"`
+	Action      string            `json:"action"`
+	Target      string            `json:"target"`
+	Namespace   string            `json:"namespace,omitempty"` // the target's scope (a namespace, or a tenant)
+	Change      map[string]string `json:"change,omitempty"`    // the approved parameters, for the executor to check
+	Fingerprint string            `json:"fingerprint"`
+	ApprovedBy  string            `json:"approved_by"`
 	jwt.RegisteredClaims
 }
 
 func (s *Signer) MintCapability(r *Request, expires time.Time) (token, jti string, err error) {
 	jti = randomID("cap-")
 	claims := CapabilityClaims{
-		RequestID: r.ID, Action: r.Action, Target: r.Target.String(), Fingerprint: r.Fingerprint, ApprovedBy: r.DecidedBy,
+		RequestID: r.ID, Action: r.Action, Target: r.Target.String(), Namespace: r.Target.Namespace, Change: r.Change,
+		Fingerprint: r.Fingerprint, ApprovedBy: r.DecidedBy,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer: s.issuer, Subject: r.Agent, Audience: jwt.ClaimStrings{CapabilityAudience}, ID: jti,
 			IssuedAt: jwt.NewNumericDate(time.Now()), ExpiresAt: jwt.NewNumericDate(expires),

@@ -87,7 +87,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 | **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **244** automated tests (212 + 32 for Sentinel Guard), plus 25 Guard checks on a real API server; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **252** automated tests (incl. 34 for Sentinel Guard), plus 25 Guard checks on a real API server; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 
@@ -103,8 +103,8 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 </td><td width="50%" valign="top">
 
 **🔐 Zero-trust security**
-- Only the gateway can mint credentials: **ES256 + JWKS**; every other service verifies and can't forge
-- **Single-use capabilities** with a Redis replay store that **fails closed**
+- Only the gateway mints service credentials and only **Sentinel Guard** issues capabilities: **ES256 + JWKS**; every other service verifies and can't forge
+- **Single-use capabilities** bound to the exact action and parameters, redeemed once at the guard, which **fails closed**
 - Users via **OIDC** (Keycloak, PKCE); every hop authenticated and **tenant-bound**
 - **Row-level security** everywhere, including the agent's checkpoints; per-pod least-privilege secrets **checked in CI**
 
@@ -196,7 +196,7 @@ CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers o
 |---|---|
 | The agent's state machine (investigate → … → verify) | [`agent-service/app/graph.py`](agent-service/app/graph.py) |
 | Guardrails: interlocks, citation validation, PII/injection | [`agent-service/app/guardrails.py`](agent-service/app/guardrails.py) |
-| Single-use capability, checked before any side effect | [`mcp-tools/remediation/server.py`](mcp-tools/remediation/server.py) · [`RemediationTokens.java`](gateway-service/src/main/java/dev/sentinel/gateway/remediation/RemediationTokens.java) |
+| Single-use capability, checked before any side effect | [`mcp-tools/remediation/server.py`](mcp-tools/remediation/server.py) · [`GuardClient.java`](gateway-service/src/main/java/dev/sentinel/gateway/remediation/GuardClient.java) · [`guard_client.py`](agent-service/app/guard_client.py) |
 | Issuer-routed JWT verification (no algorithm confusion) | [`RoutingJwtDecoder.java`](gateway-service/src/main/java/dev/sentinel/gateway/identity/RoutingJwtDecoder.java) |
 | Race-safe alert dedup and correlation | [`AlertLinkRepository.java`](gateway-service/src/main/java/dev/sentinel/gateway/alert/AlertLinkRepository.java) |
 | Row-level security on LangGraph checkpoints | [`agent-service/app/checkpoint.py`](agent-service/app/checkpoint.py) |
@@ -222,6 +222,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 | 8 Zero trust | ES256 + JWKS, Keycloak OIDC, every hop authenticated, checkpoint RLS |
 | 9 Publish and measure | Full local-LLM benchmark; runbook preconditions take gemma4 from 11.6% to **0%** harmful actions |
 | 10 Sentinel Guard (v2 alpha) | The safety core as a Kubernetes-native Go service for any agent; exactly-once proven on a real API server, including its write retries; p99 **42.9 ms** for an approved change |
+| 11 The copilot on the guard | One safety core: the agent proposes to the guard, console approvals are recorded there by the gateway, the adapter redeems the guard's capability; live: alert → **verified fix in 24.4 s** |
 
 <details>
 <summary><b>All design decisions and their reasons</b></summary>
@@ -237,7 +238,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 | Hybrid retrieval in Postgres | Vectors and full-text live in the same row and are fused with RRF. One system, one transaction, one RLS model. See [ADR-0003](docs/adr/0003-hybrid-retrieval-in-postgres.md). |
 | Tools over MCP | Observability and runbook search are MCP servers the agent discovers at runtime, reusable by any MCP client. See [ADR-0004](docs/adr/0004-mcp-tools-scoped-tokens-and-budgets.md). |
 | Downscoped tool tokens | The agent never holds a user's token: the gateway mints a 15-minute, single-tenant, `knowledge:read`, MCP-only JWT per incident, and it's never checkpointed. |
-| Capabilities, not deploy credentials | The agent holds no standing power to change production. Approval mints a 5-minute JWT bound to one action, one service and one incident. The adapter verifies every claim and spends its jti in Redis before acting, failing closed. A compromised agent can at most do the one thing a human approved, once. See [ADR-0008](docs/adr/0008-closed-loop-capabilities-and-alert-intake.md). |
+| Capabilities, not deploy credentials | The agent holds no standing power to change production. It registers each proposal in Sentinel Guard; when a human approves in the console, the gateway records that decision in the guard on their behalf, and only then does the guard issue a single-use capability bound to one action, one service, the approved parameters and one incident. The adapter verifies it with the guard's public key and redeems it at the guard before acting, failing closed. A compromised agent can at most do the one thing a human approved, once. See [ADR-0008](docs/adr/0008-closed-loop-capabilities-and-alert-intake.md) and [ADR-0011](docs/adr/0011-copilot-approvals-through-the-guard.md). |
 | Alerts open incidents | Alertmanager webhook with a per-tenant integration token. Re-fires are deduplicated, and several rules tripping on one fault are correlated into one incident under a per-service advisory lock. `opened_at` = the alert's start. |
 | Zero-trust identity | Only the gateway can mint service credentials: ES256 with a published JWKS, so the agent, MCP servers and remediation adapter verify but can't forge. Users sign in through OIDC (Keycloak in dev). Every hop is authenticated and tenant-bound, and the agent's checkpoints are under Postgres RLS. CI checks which pod may hold which secret. See [ADR-0009](docs/adr/0009-zero-trust-identity.md). |
 | Verified, measured outcomes | "Resolved" means probes pass after the fix, not "someone clicked approve". Time to mitigate is recorded per incident and as a histogram. |

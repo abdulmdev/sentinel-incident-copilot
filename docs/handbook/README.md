@@ -2,7 +2,7 @@
 
 The complete reference for Sentinel: what it is, how it's designed (high level and low level), why each decision was made, how it's tested, deployed and operated, and what happened in each phase of building it.
 
-> **Status:** current as of **Phase 10: Sentinel Guard, v2 alpha (2026-10-23)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
+> **Status:** current as of **Phase 11: The copilot on Sentinel Guard (2026-10-24)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
 
 ## How to read it
 
@@ -25,7 +25,7 @@ The complete reference for Sentinel: what it is, how it's designed (high level a
 - [`docs/Sentinel-Handbook.pdf`](../Sentinel-Handbook.pdf): A4, cover, contents, page numbers.
 - [`Sentinel-Handbook.html`](Sentinel-Handbook.html): self-contained, opens in any browser.
 
-Shorter companions: the [user guide](../USER-GUIDE.md), the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the ten [architecture decision records](../adr/).
+Shorter companions: the [user guide](../USER-GUIDE.md), the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the eleven [architecture decision records](../adr/).
 
 ## Figures
 The handbook has **74 diagrams and charts** (architecture, sequence, state, ER, deployment, flowcharts, data charts) and **15 screenshots of the running system** (console incl. the closed loop, Jaeger, Grafana, Prometheus targets and alerts). Every figure is numbered and captioned.

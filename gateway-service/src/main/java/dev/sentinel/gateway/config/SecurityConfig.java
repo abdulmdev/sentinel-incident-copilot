@@ -15,7 +15,6 @@ import dev.sentinel.gateway.incident.AgentTokens;
 import dev.sentinel.gateway.integration.IntegrationController;
 import dev.sentinel.gateway.integration.IntegrationTokenRepository;
 import dev.sentinel.gateway.mcp.ToolTokens;
-import dev.sentinel.gateway.remediation.RemediationTokens;
 import dev.sentinel.gateway.tenant.TenantRateLimitFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -42,14 +41,15 @@ import org.springframework.security.web.access.intercept.RequestAuthorizationCon
  *       while not revoked);</li>
  *   <li>nobody else: unknown issuers are rejected by the decoder.</li>
  * </ul>
- * Capabilities and agent-call tokens are verified by the adapter and the agent, never accepted here.
+ * Agent-call tokens are verified by the agent, never accepted here; capabilities are issued by Sentinel Guard
+ * (another issuer, so the decoder rejects them).
  */
 @Configuration
 public class SecurityConfig {
 
     /** Service-token audiences: each is accepted only on its own surface, never on the general API. */
     public static final Set<String> SERVICE_AUDIENCES = Set.of(ToolTokens.AUDIENCE, AlertController.AUDIENCE,
-            RemediationTokens.AUDIENCE, AgentTokens.AUDIENCE);
+            AgentTokens.AUDIENCE);
 
     @Bean
     RoutingJwtDecoder jwtDecoder(AuthProperties props, SigningKeys keys) {

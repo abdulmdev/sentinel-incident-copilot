@@ -55,7 +55,13 @@ type Server struct {
 	Ready      func() bool
 }
 
-func (s *Server) Handler() http.Handler {
+func (s *Server) Handler() http.Handler { return s.handler(true) }
+
+// APIHandler serves the action API without the admission webhooks, for an in-cluster
+// plain-HTTP listener (clients in other namespaces can't trust the webhook's private CA).
+func (s *Server) APIHandler() http.Handler { return s.handler(false) }
+
+func (s *Server) handler(admission bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
@@ -72,12 +78,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/actions", s.agentOnly(s.propose))
 	mux.HandleFunc("GET /v1/actions/{id}", s.agentOnly(s.status))
 	mux.HandleFunc("GET /v1/actions", s.adminOnly(s.list))
-	mux.HandleFunc("POST /v1/actions/{id}/approve", s.adminOnly(s.decide(true)))
-	mux.HandleFunc("POST /v1/actions/{id}/deny", s.adminOnly(s.decide(false)))
+	mux.HandleFunc("POST /v1/actions/{id}/approve", s.deciders(s.decide(true)))
+	mux.HandleFunc("POST /v1/actions/{id}/deny", s.deciders(s.decide(false)))
 	mux.HandleFunc("POST /v1/capabilities/spend", s.spend)
 	mux.HandleFunc("GET /v1/audit/verify", s.adminOnly(s.verify))
-	mux.HandleFunc("POST /admission/workloads", s.timed("workloads", s.admitWorkload))
-	mux.HandleFunc("POST /admission/approvals", s.timed("approvals", s.admitApproval))
+	if admission {
+		mux.HandleFunc("POST /admission/workloads", s.timed("workloads", s.admitWorkload))
+		mux.HandleFunc("POST /admission/approvals", s.timed("approvals", s.admitApproval))
+	}
 	return mux
 }
 
@@ -109,6 +117,31 @@ func (s *Server) agentOnly(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, identity{user, groups})))
+	}
+}
+
+// deciders admits the two kinds of callers that may record a human decision over HTTP: the
+// admin token (single-process mode), or a delegate (policy `delegates`), a service that
+// authenticated the person itself (Sentinel's gateway, for its console users). A delegate's
+// decision is recorded as made by that person, via the delegate.
+func (s *Server) deciders(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := bearer(r)
+		if s.AdminToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.AdminToken)) == 1 {
+			next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, identity{})))
+			return
+		}
+		if token != "" && s.Agents != nil {
+			if user, groups, err := s.Agents.Authenticate(r.Context(), token); err == nil && s.Engine.Policy().IsDelegate(user, groups) {
+				next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, identity{user, groups})))
+				return
+			}
+		}
+		if s.AdminToken == "" {
+			writeError(w, 403, "only a configured delegate may decide over HTTP here: people approve with `kubectl sentinel approve <id>`")
+			return
+		}
+		writeError(w, 401, "the admin token or a delegate's token is required")
 	}
 }
 
@@ -201,7 +234,8 @@ func (s *Server) decide(approve bool) http.HandlerFunc {
 			writeError(w, 400, "approver (who is deciding, for the audit trail) is required")
 			return
 		}
-		req, err := s.Engine.Decide(r.Context(), r.PathValue("id"), body.Approver, nil, approve, body.Note)
+		via := r.Context().Value(ctxKey{}).(identity).user // empty for the admin token
+		req, err := s.Engine.Decide(r.Context(), r.PathValue("id"), body.Approver, nil, via, approve, body.Note)
 		if err != nil {
 			s.writeErr(w, err)
 			return

@@ -80,7 +80,7 @@ func TestApprovalAdmitsExactlyOnce(t *testing.T) {
 	if again.Request.ID != first.Request.ID {
 		t.Fatal("a retry while pending must not create a second request")
 	}
-	if _, err := e.Decide(ctx, first.Request.ID, "alice@example.com", nil, true, "looks right"); err != nil {
+	if _, err := e.Decide(ctx, first.Request.ID, "alice@example.com", nil, "", true, "looks right"); err != nil {
 		t.Fatal(err)
 	}
 	admitted := mustEval(t, e, scaleTo("3"), guard.VerdictAllow)
@@ -100,7 +100,7 @@ func TestApprovalAdmitsExactlyOnce(t *testing.T) {
 func TestApprovalIsBoundToTheExactChange(t *testing.T) {
 	e, _, _ := defaultEngine(t)
 	out := mustEval(t, e, scaleTo("3"), guard.VerdictPending)
-	if _, err := e.Decide(context.Background(), out.Request.ID, "alice", nil, true, ""); err != nil {
+	if _, err := e.Decide(context.Background(), out.Request.ID, "alice", nil, "", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	other := mustEval(t, e, scaleTo("5"), guard.VerdictPending)
@@ -117,16 +117,16 @@ func TestWhoMayDecide(t *testing.T) {
 	e, _, _ := defaultEngine(t)
 	ctx := context.Background()
 	out := mustEval(t, e, scaleTo("3"), guard.VerdictPending)
-	if _, err := e.Decide(ctx, out.Request.ID, "system:serviceaccount:agents:other", []string{"system:serviceaccounts:agents"}, true, ""); !errors.Is(err, guard.ErrForbidden) {
+	if _, err := e.Decide(ctx, out.Request.ID, "system:serviceaccount:agents:other", []string{"system:serviceaccounts:agents"}, "", true, ""); !errors.Is(err, guard.ErrForbidden) {
 		t.Fatalf("another agent approved: %v", err)
 	}
-	if _, err := e.Decide(ctx, out.Request.ID, agent, nil, true, ""); !errors.Is(err, guard.ErrForbidden) {
+	if _, err := e.Decide(ctx, out.Request.ID, agent, nil, "", true, ""); !errors.Is(err, guard.ErrForbidden) {
 		t.Fatalf("the requester approved its own request: %v", err)
 	}
-	if _, err := e.Decide(ctx, out.Request.ID, "alice", nil, false, "not now"); err != nil {
+	if _, err := e.Decide(ctx, out.Request.ID, "alice", nil, "", false, "not now"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Decide(ctx, out.Request.ID, "bob", nil, true, ""); !errors.Is(err, guard.ErrConflict) {
+	if _, err := e.Decide(ctx, out.Request.ID, "bob", nil, "", true, ""); !errors.Is(err, guard.ErrConflict) {
 		t.Fatalf("a decided request was decided again: %v", err)
 	}
 	denied := mustEval(t, e, scaleTo("3"), guard.VerdictBlock)
@@ -142,7 +142,7 @@ func TestPolicyLimitsBlockAndCannotBeApproved(t *testing.T) {
 	if !strings.Contains(zero.Message, "below the minimum 1") {
 		t.Fatal(zero.Message)
 	}
-	if _, err := e.Decide(ctx, zero.Request.ID, "alice", nil, true, ""); !errors.Is(err, guard.ErrConflict) {
+	if _, err := e.Decide(ctx, zero.Request.ID, "alice", nil, "", true, ""); !errors.Is(err, guard.ErrConflict) {
 		t.Fatalf("a blocked request was approved: %v", err)
 	}
 	mustEval(t, e, scaleTo("0"), guard.VerdictBlock)
@@ -164,7 +164,7 @@ func TestExpiry(t *testing.T) {
 	if second.Request.ID == first.Request.ID {
 		t.Fatal("an expired request must not be reused")
 	}
-	if _, err := e.Decide(ctx, second.Request.ID, "alice", nil, true, ""); err != nil {
+	if _, err := e.Decide(ctx, second.Request.ID, "alice", nil, "", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	c.advance(11 * time.Minute) // approvals are usable for 10 minutes
@@ -231,7 +231,7 @@ func TestAPICapabilityIsSingleUse(t *testing.T) {
 	if waiting.Verdict != guard.VerdictPending || waiting.Capability != "" {
 		t.Fatalf("capability before approval: %+v", waiting)
 	}
-	if _, err := e.Decide(ctx, out.Request.ID, "alice", nil, true, ""); err != nil {
+	if _, err := e.Decide(ctx, out.Request.ID, "alice", nil, "", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	granted, err := e.Capability(ctx, out.Request.ID, "refund-bot")
@@ -267,7 +267,7 @@ func TestAPICapabilityIsSingleUse(t *testing.T) {
 func TestConcurrentRetriesAdmitOnce(t *testing.T) {
 	e, mem, _ := defaultEngine(t)
 	out := mustEval(t, e, scaleTo("3"), guard.VerdictPending)
-	if _, err := e.Decide(context.Background(), out.Request.ID, "alice", nil, true, ""); err != nil {
+	if _, err := e.Decide(context.Background(), out.Request.ID, "alice", nil, "", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	var allowed atomic.Int32
@@ -316,7 +316,7 @@ func TestALostRaceLeavesASignedVoidNotAGap(t *testing.T) {
 	ctx := context.Background()
 	out := mustEval(t, e, scaleTo("3"), guard.VerdictPending)
 	racy.failIn = 2 // Decide records the decision, then applies it: the second write loses
-	if _, err := e.Decide(ctx, out.Request.ID, "alice", nil, true, ""); err == nil {
+	if _, err := e.Decide(ctx, out.Request.ID, "alice", nil, "", true, ""); err == nil {
 		t.Fatal("expected the injected conflict")
 	}
 	mustEval(t, e, scaleTo("4"), guard.VerdictPending)
@@ -350,7 +350,7 @@ func TestAuditChainDetectsTampering(t *testing.T) {
 	e, mem, _ := defaultEngine(t)
 	ctx := context.Background()
 	a := mustEval(t, e, scaleTo("3"), guard.VerdictPending)
-	_, _ = e.Decide(ctx, a.Request.ID, "alice", nil, true, "")
+	_, _ = e.Decide(ctx, a.Request.ID, "alice", nil, "", true, "")
 	mustEval(t, e, scaleTo("3"), guard.VerdictAllow)
 	b := mustEval(t, e, scaleTo("4"), guard.VerdictPending)
 	mustEval(t, e, scaleTo("0"), guard.VerdictBlock)
@@ -411,7 +411,7 @@ func TestAPIServerRetryIsReadmittedButNewAttemptsAreNot(t *testing.T) {
 			Target: guard.Target{Group: "apps", Resource: "deployments", Namespace: "shop", Name: "web"}}
 	}
 	out := mustEval(t, e, restart("exact:t1"), guard.VerdictPending)
-	if _, err := e.Decide(context.Background(), out.Request.ID, "alice", nil, true, ""); err != nil {
+	if _, err := e.Decide(context.Background(), out.Request.ID, "alice", nil, "", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	mustEval(t, e, restart("exact:t1"), guard.VerdictAllow)

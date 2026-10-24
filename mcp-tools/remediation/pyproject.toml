@@ -7,7 +7,6 @@ dependencies = [
     "httpx>=0.28",
     "uvicorn>=0.32",
     "pyjwt[crypto]>=2.9",
-    "redis>=5.2",
 ]
 
 [dependency-groups]

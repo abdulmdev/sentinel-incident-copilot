@@ -467,6 +467,59 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 
 ---
 
+## Phase 11: The copilot on Sentinel Guard
+**Goal:** one safety core. Since Phase 10 the repository had two approval paths: the guard, for any agent, and the copilot's own v1 path, where the gateway minted capabilities and the adapter kept a Redis replay store. Move the flagship onto the guard ([ADR-0011](../adr/0011-copilot-approvals-through-the-guard.md)).
+
+**Built**
+- **Agent:**
+  - a `request_approval` node registers each proposal with the guard once, before the interrupt (target = tenant/service; change = incident + parameters);
+  - `execute` collects the single-use capability from the guard (`app/guard_client.py`); `remediation_token` is gone from config and the decision API.
+- **Gateway:**
+  - `GuardClient` records the reviewer's decision in the guard **as a delegate**, before resuming the agent; rejections are recorded too, and a refusal resumes nothing;
+  - `RemediationTokens` is deleted: the gateway mints no capabilities;
+  - `remediation_audit.guard_request` (**V8**).
+- **Adapter:**
+  - verifies capabilities with the guard's JWKS (`aud sentinel-action`) and checks **every parameter** against the approval;
+  - redeems the capability at the guard (fail closed); the Redis replay store and dependency are removed.
+- **Guard:**
+  - delegated decisions (`delegates`, `decidedVia`);
+  - capability claims `namespace` and `change`;
+  - a plain-HTTP in-cluster API listener (`SENTINEL_GUARD_API_ADDR`);
+  - `SENTINEL_GUARD_DELEGATE_TOKENS`.
+- **Deployment:**
+  - the `sentinel` chart depends on `sentinel-guard`, with its own ServiceAccounts and projected tokens for the agent and gateway, and a NetworkPolicy for the guard;
+  - the guard is wired into `dev-local.sh` (:8400), compose, `build-images.sh` and `kind-up.sh`;
+  - `deploy/guard/copilot-policy.yaml`.
+
+**Decisions** (ADR-0011):
+- **The agent is the requester; the gateway is a delegate.** The guard tells them apart by identity, so the agent can never approve its own proposal.
+- **Record the decision in the guard before resuming the agent,** and record rejections too.
+- **Bind approvals to the parameters** (`size`, `replicas`), not just action and target.
+- **The agent's interlocks stay where they are.** They shape what a human sees and are gated by the benchmark; the guard decides what may run.
+
+**Bugs found and fixed**
+
+| Found | How | Fix |
+|---|---|---|
+| The agent and the gateway both ran as the namespace's `default` ServiceAccount, so the guard couldn't tell the requester from the approver | Designing the delegate check | Per-component ServiceAccounts (`guardIdentity`) with projected, rotating tokens |
+| Proposing inside the `approval` node would run twice: LangGraph re-executes an interrupted node from the top on resume, and the second proposal would collect (and lose) the capability | Reading the resume semantics before writing the node | A separate `request_approval` node; a test asserts one proposal across the resume |
+| A rejected request stayed pending in the guard and could still be approved later | Review of the decide flow | The gateway records rejections in the guard too |
+| `dev-local.sh up` hung: the local guard took :8090, which ingestion already uses | The first live start | The guard runs on :8400 locally |
+| The console showed "Sentinel Guard: Sentinel Guard unavailable" | The live outage check | One clear message: "unavailable, so nothing was approved or resumed" |
+| A guard-issued capability presented to the gateway API got 401, where the old test expected 403 | `AlertSecurityTest` | Correct and stronger: the gateway doesn't trust the guard's issuer at all; the test now expects 401 |
+
+**Results** (2026-10-24):
+- **Live, `scripts/dev-local.sh`:**
+  - A bad deploy → Prometheus → Alertmanager opened the incident by itself in **27 s**.
+  - The agent proposed a rollback and registered it (`ar-11c9451b-1`, Pending, agent `sentinel-agent`, tenant `acme`).
+  - `bob@acme` approved through the gateway → **RESOLVED**, verified healthy on the first probe, **time to mitigate 24.4 s**.
+  - The guard's chain verified (4 events: requested by the agent, approved by `bob@acme [via sentinel-gateway]`, capability issued, executed by `sentinel-remediation`). The DB audit row, the adapter's log line and the guard all carry the same request id and capability jti.
+  - Replaying the decision → 409.
+  - With the guard stopped, a second incident's approval → **503, nothing resumed, nothing executed**.
+- **252 automated tests** pass: gateway 93, guard 34, agent 72, adapter 17, eval 14, observability 12, ingestion 10. The rule baseline and the held-out set still pass the gate unchanged.
+
+---
+
 ## Template for the next entry
 ```
 ## Phase N: <theme>

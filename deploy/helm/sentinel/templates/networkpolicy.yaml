@@ -19,6 +19,27 @@ spec:
 {{- /* Only the agent reaches the remediation adapter, and it still needs a human-approved capability. */}}
 {{- include "sentinel.np" (dict "root" . "to" "mcp-remediation" "from" (list "agent")) }}
 {{- include "sentinel.np" (dict "root" . "to" "ingestion" "from" (list)) }}
+{{- if index .Values "sentinel-guard" "enabled" }}
+---
+# Sentinel Guard: the API server calls its webhooks (its source address differs by distribution, so the
+# webhook port is open; every call is an authenticated admission review). Only the agent, the gateway and
+# the remediation adapter reach its in-cluster action API.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $r }}-allow-guard
+  labels: {{- include "sentinel.labels" . | nindent 4 }}
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: sentinel-guard, app.kubernetes.io/instance: {{ $r }} } }
+  policyTypes: [Ingress]
+  ingress:
+    - ports: [{ port: 8443 }]
+    - from:
+        {{- range (list "agent" "gateway" "mcp-remediation") }}
+        - podSelector: { matchLabels: { app.kubernetes.io/instance: {{ $r }}, app.kubernetes.io/component: {{ . }} } }
+        {{- end }}
+      ports: [{ port: {{ index .Values "sentinel-guard" "api" "port" }} }]
+{{- end }}
 {{- if .Values.chaosLab.enabled }}
 {{- range .Values.chaosLab.services }}
 {{- include "sentinel.np" (dict "root" $ "to" . "from" (concat (list "mcp-observability" "mcp-remediation") $.Values.chaosLab.services)) }}

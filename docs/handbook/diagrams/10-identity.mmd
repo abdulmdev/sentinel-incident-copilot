@@ -2,27 +2,35 @@ flowchart TB
   subgraph issuers[Issuers]
     IDP["IdP (Keycloak)<br/>RS256 · users"]
     G["gateway key ring<br/>ES256 · kid · private keys ONLY here"]
+    SGK["Sentinel Guard key<br/>ES256 · its own · capabilities only"]
+    K8S["Kubernetes API server<br/>ServiceAccount tokens (projected, 1 h)"]
     DEV["dev issuer (optional)<br/>HS256 · users only · off in prod"]
   end
   subgraph tokens[Tokens]
     U[user token<br/>aud sentinel-api]
     T[tool token<br/>sentinel-mcp · 15 min]
     A[agent-call token<br/>sentinel-agent · 60 s]
-    C[capability<br/>sentinel-remediation · 5 min · once]
+    C[capability<br/>sentinel-action · once · expires with the approval]
     I[integration token<br/>sentinel-alerts · revocable]
+    SA[agent / gateway identity<br/>towards the guard]
   end
-  subgraph verifiers["Verifiers (public keys only)"]
+  subgraph verifiers["Verifiers (public keys or TokenReview)"]
     VG[gateway API + /mcp + webhook]
     VA[agent]
     VO[mcp-observability]
     VR[remediation adapter]
+    VS[Sentinel Guard]
   end
   IDP --> U
   DEV -.-> U
-  G --> T & A & C & I
+  G --> T & A & I
+  SGK --> C
+  K8S --> SA
   U --> VG
   T --> VG & VO
   I --> VG
   A --> VA
   C --> VR
-  J[("/.well-known/jwks.json")] -. keys .-> VA & VO & VR
+  SA --> VS
+  J[("gateway JWKS")] -. keys .-> VA & VO
+  JG[("guard JWKS")] -. keys .-> VR

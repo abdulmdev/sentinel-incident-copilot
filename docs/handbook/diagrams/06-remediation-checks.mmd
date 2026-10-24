@@ -1,16 +1,16 @@
 flowchart TB
-  C[tools/call action service<br/>Authorization: Bearer capability] --> J{"ES256 signature by the gateway (JWKS, kid),<br/>iss, aud = sentinel-remediation,<br/>not expired?"}
+  C[tools/call action service params<br/>Authorization: Bearer capability] --> J{"ES256 signature by Sentinel Guard (its JWKS, kid),<br/>iss sentinel-guard, aud = sentinel-action,<br/>not expired, has jti and request_id?"}
   J -->|no| X1[refuse · invalid capability token]
-  J -->|yes| S{scope has<br/>remediation:execute?}
-  S -->|no| X2[refuse · lacks remediation:execute]
-  S -->|yes| B{claims.action = this tool and<br/>claims.target = service?}
+  J -->|yes| B{claims.action = this tool and<br/>claims.target = service?}
   B -->|no| X3[refuse · capability covers other action/target]
-  B -->|yes| D{dry_run?}
-  D -->|yes| OKD[validated · capability NOT spent · no ops call]
-  D -->|no| R{Redis SET NX jti EX ttl}
-  R -->|already set| X4[refuse · capability already used]
-  R -->|Redis unreachable| X5[refuse · replay protection unavailable<br/>fails closed]
-  R -->|set| OPS[POST service /ops/action] --> AUD[JSON audit line with jti<br/>executed: true]
+  B -->|yes| P{every parameter = the approved<br/>claims.change value? size, replicas}
+  P -->|no| X2[refuse · capability approves size=40, not size=60]
+  P -->|yes| D{dry_run?}
+  D -->|yes| OKD[validated · capability NOT redeemed · no ops call]
+  D -->|no| R{redeem at the guard<br/>POST /v1/capabilities/spend}
+  R -->|409| X4[refuse · capability already used]
+  R -->|unreachable or error| X5[refuse · Sentinel Guard unavailable<br/>fails closed]
+  R -->|200| OPS[POST service /ops/action] --> AUD[JSON audit line with jti and guard request<br/>executed: true]
   classDef bad fill:#fdecea,stroke:#b42318,color:#1d1d1b
   classDef ok fill:#e7f5ee,stroke:#1f7a4d,color:#1d1d1b
   class X1,X2,X3,X4,X5 bad

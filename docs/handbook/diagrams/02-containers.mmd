@@ -13,19 +13,21 @@ flowchart TB
     KN[Knowledge upload + search]
     ASK[Ask: RAG + semantic cache]
     MCPK["/mcp search_runbooks"]
-    TT["ServiceTokens (ES256)<br/>tool · agent-call · capability · integration<br/>/.well-known/jwks.json"]
+    TT["ServiceTokens (ES256)<br/>tool · agent-call · integration<br/>/.well-known/jwks.json"]
+    GC["GuardClient<br/>records reviewers' decisions (delegate)"]
   end
   subgraph ag["agent-service · LangGraph :8000"]
-    G[investigator ⇄ tools → triage → rca → guardrails<br/>→ approval → execute → verify → postmortem]
+    G[investigator ⇄ tools → triage → rca → guardrails<br/>→ request_approval → approval → execute → verify → postmortem]
   end
   MO["mcp-observability :8200<br/>deploys · logs · metrics · probe"]
   MR["mcp-remediation :8300<br/>capability-gated ops"]
+  SG["Sentinel Guard (Go)<br/>approvals · single-use capabilities<br/>signed audit chain"]
   CH["chaos-lab<br/>checkout :8101 · inventory :8102<br/>/ops/* · loadgen"]
   PA["Prometheus :9090<br/>+ Alertmanager :9093"]
   ING["ingestion-service :8090<br/>chunk → embed → index<br/>owns migrations"]
   PG[("Postgres 16 + pgvector<br/>row-level security")]
   K[("Kafka<br/>knowledge.documents")]
-  R[("Redis<br/>rate limits · used capabilities")]
+  R[("Redis<br/>rate limits")]
   L[("LLM<br/>Claude or Ollama")]
   KC[("Keycloak · IdP<br/>users · tenant_id · roles")]
   UI --> SESS & PROXY
@@ -36,7 +38,9 @@ flowchart TB
   PA -->|"webhook · integration token"| SEC
   PA -. scrape .-> CH
   ALR --> INC
-  INC -->|"open / decision + traceparent<br/>tool token · capability"| G
+  INC -->|"open / decision + traceparent<br/>tool token"| G
+  INC --> GC -->|"approve / deny as delegate"| SG
+  G -->|"propose · collect capability"| SG
   INC --> PG
   KN -->|produce| K --> ING --> PG
   KN --> PG
@@ -46,6 +50,6 @@ flowchart TB
   G -->|"MCP · Bearer tool token"| MCPK
   G -->|MCP| MO --> CH
   G -->|"MCP · Bearer capability"| MR --> CH
-  MR -->|"SET NX jti"| R
+  MR -->|"redeem once"| SG
   G --> L
   G -->|checkpoints| PG

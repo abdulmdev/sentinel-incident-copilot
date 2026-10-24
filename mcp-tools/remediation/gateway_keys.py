@@ -1,6 +1,6 @@
-"""Verifies ES256 tokens minted by the Sentinel gateway, against its published JWKS.
+"""Verifies ES256 tokens against their issuer's published JWKS: here, Sentinel Guard's capabilities.
 
-No shared secret: this service can check the gateway's tokens but can't create one. Only ES256 is
+No shared secret: this service can check the issuer's tokens but can't create one. Only ES256 is
 accepted (no HS/none confusion); issuer, audience, expiry and (optionally) a scope are required.
 Keys are cached and refetched on an unknown kid, so gateway key rotation needs no coordination.
 """

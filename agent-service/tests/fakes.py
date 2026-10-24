@@ -1,6 +1,7 @@
 """Test doubles: MCP-shaped tools and a scripted chat model."""
 from __future__ import annotations
 
+import base64
 import itertools
 import json
 from typing import Any, Callable
@@ -115,3 +116,38 @@ def tool_calls_reply(*calls: tuple[str, dict], usage: dict | None = None) -> AIM
     return AIMessage(content="", tool_calls=[{"name": n, "args": a, "id": f"tc_{next(_ids)}", "type": "tool_call"}
                                              for n, a in calls],
                      usage_metadata=usage or {"input_tokens": 1000, "output_tokens": 100, "total_tokens": 1100})
+
+
+class FakeGuard:
+    """Same contract as Sentinel Guard's action API (app/guard_client.py): propose → (a human
+    approves, through the gateway) → a single-use capability, issued once."""
+
+    def __init__(self, down: bool = False):
+        self.down = down
+        self.proposals: list[dict] = []
+        self.approved: set[str] = set()
+        self.issued: set[str] = set()
+
+    async def propose(self, action, tenant, service, change, intent):
+        if self.down:
+            raise ConnectionError("guard unreachable")
+        rid = f"ar-test-{len(self.proposals) + 1}"
+        self.proposals.append({"id": rid, "action": action, "tenant": tenant, "service": service,
+                               "change": change, "intent": intent})
+        return {"verdict": "pending", "request": {"id": rid},
+                "message": f"Sentinel Guard: {action} of {service} needs human approval (request {rid})."}
+
+    def approve(self, rid=None):
+        """What the gateway does on the reviewer's behalf before resuming the agent."""
+        self.approved.add(rid or self.proposals[-1]["id"])
+
+    async def capability(self, rid):
+        if self.down:
+            raise ConnectionError("guard unreachable")
+        if rid not in self.approved:
+            return {"verdict": "pending", "message": f"request {rid} needs human approval"}
+        if rid in self.issued:
+            return {"verdict": "block", "message": f"the capability for {rid} was already issued"}
+        self.issued.add(rid)
+        payload = base64.urlsafe_b64encode(json.dumps({"jti": f"cap-{rid}"}).encode()).decode().rstrip("=")
+        return {"verdict": "allow", "capability": f"eyJhbGciOiJFUzI1NiJ9.{payload}.sig", "request": {"id": rid}}

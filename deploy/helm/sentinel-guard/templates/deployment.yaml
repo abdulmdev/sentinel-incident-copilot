@@ -46,9 +46,15 @@ spec:
             - {name: SENTINEL_GUARD_SERVICE, value: sentinel-guard}
             - {name: SENTINEL_GUARD_VALIDATING_WEBHOOK, value: sentinel-guard}
             - {name: SENTINEL_GUARD_MUTATING_WEBHOOK, value: sentinel-guard}
+            {{- if .Values.api.plainHTTP }}
+            - {name: SENTINEL_GUARD_API_ADDR, value: ":{{ .Values.api.port }}"}
+            {{- end }}
           ports:
             - {name: https, containerPort: 8443}
             - {name: metrics, containerPort: 9090}
+            {{- if .Values.api.plainHTTP }}
+            - {name: http, containerPort: {{ .Values.api.port }}}
+            {{- end }}
           readinessProbe:
             httpGet: {path: /readyz, port: https, scheme: HTTPS}
             periodSeconds: 5
@@ -95,3 +101,6 @@ spec:
   ports:
     - {name: https, port: 443, targetPort: https}
     - {name: metrics, port: 9090, targetPort: metrics}
+    {{- if .Values.api.plainHTTP }}
+    - {name: http, port: {{ .Values.api.port }}, targetPort: http}
+    {{- end }}

@@ -23,6 +23,19 @@ agents:
   groups: ["system:serviceaccounts:agents"]   # every ServiceAccount in the "agents" namespace
   users: []                                   # e.g. system:serviceaccount:ci:deploy-bot
 
+# Services trusted to record a decision on behalf of a person they authenticated themselves, over
+# the HTTP API (for example Sentinel's gateway for its console users). The decision is recorded as
+# that person's, "via" the delegate. People approve with kubectl sentinel either way.
+delegates:
+  users: []
+  groups: []
+
+# Also serve the action API (not the webhooks) over plain HTTP inside the cluster, for clients
+# that can't trust the guard's private CA (agents and executors in other namespaces).
+api:
+  plainHTTP: false
+  port: 8080
+
 # Who may approve or deny agent actions (RoleBinding to the approver role in this namespace).
 approvers:
   users: []
