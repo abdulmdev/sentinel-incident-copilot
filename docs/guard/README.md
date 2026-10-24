@@ -9,14 +9,14 @@ Guard is the safety core of [Sentinel](../../README.md) (approval → single-use
 - **Tamper-evident.** Every request, decision and execution is a signed link in a hash chain. `kubectl sentinel audit verify` checks it yourself, and also detects deleted records.
 - **Small.** One Go binary, an 11.5 MB image (compressed). It needs no database: its state lives in the Kubernetes API, so three replicas share it.
 
-> **Status: v2.0.0-alpha.1.** The design and the safety properties are tested on a real API server in CI (25 checks, below). Treat the API and the CRD (`v1alpha1`) as subject to change.
+> **Status: v2.0.0-alpha.2.** The design and the safety properties are tested on a real API server in CI (25 checks, below). Treat the API and the CRD (`v1alpha1`) as subject to change.
 
 ## Try it in one minute (Docker, no cluster)
 The same guard runs as a single process with an HTTP API: an agent asks before acting, a human approves, and the agent gets a single-use capability that the executor redeems.
 
 ```bash
 docker run --rm -p 8080:8080 -e SENTINEL_GUARD_AGENT_TOKENS=refund-bot=agent-secret \
-  -e SENTINEL_GUARD_ADMIN_TOKEN=approver-secret ghcr.io/abdulmdev/sentinel-guard:2.0.0-alpha.1
+  -e SENTINEL_GUARD_ADMIN_TOKEN=approver-secret ghcr.io/abdulmdev/sentinel-guard:2.0.0-alpha.2
 ```
 
 The agent proposes an action. The guard answers `pending`, with a request id:
@@ -51,14 +51,14 @@ Single-process mode keeps state in memory: it's for trying Guard out and for tes
 Requires Kubernetes 1.30 or newer (the webhook uses `matchConditions`).
 
 ```bash
-helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.1 \
+helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.2 \
   -n sentinel-system --create-namespace
 ```
 
 Or without Helm:
 
 ```bash
-kubectl apply -f https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.1/install.yaml
+kubectl apply -f https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.2/install.yaml
 ```
 
 Then install the kubectl plugin:
