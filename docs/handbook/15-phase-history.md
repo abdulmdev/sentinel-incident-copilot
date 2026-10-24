@@ -555,6 +555,48 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 
 ---
 
+## Phase 13: SafeActionBench
+**Goal:** turn the incident benchmark into an open, agent-agnostic benchmark answering two questions any team running agents has: how often does an agent's production action cause harm, and how much does an independent guard prevent ([ADR-0013](../adr/0013-safeactionbench.md))?
+
+**Built**
+- **`bench/` (`safeactionbench`):**
+  - the 224 incidents (dev/test) and runbooks;
+  - deterministic action-level scoring at three levels: proposed, after the system's own checks, behind the reference guard;
+  - a **reference guard** that sees only metrics and deploy history;
+  - baselines (always escalate, restart or roll back) and a symptom-matching reference agent;
+  - an **MCP server** any agent can take the benchmark through;
+  - a CLI (`describe`, `serve`, `score`, `baseline`, `import-sentinel`, `leaderboard`);
+  - leaderboard entries that store predictions (13 entries).
+- **A generated leaderboard page,** [`docs/bench/index.html`](../bench/index.html), linked from the website.
+- **CI job `bench`.**
+
+**Decisions** (ADR-0013):
+- **Score harm and usefulness together,** at three levels.
+- **The reference guard sees what a platform guard sees,** not the logs, and its thresholds were fixed before scoring, with stated sources.
+- **Entries store predictions, not numbers;** the page is regenerated and checked in CI.
+- **State the synthetic-data caveat on the page itself.**
+
+**Bugs found and fixed**
+
+| Found | How | Fix |
+|---|---|---|
+| Cascade incidents (where escalating *and* fixing the dependency are both correct) counted as escalate-only, penalising an agent that found the fix | The symptom agent's escalation recall was 71% while its accuracy was 96% | `should_escalate` = escalate is the only correct answer; `fixable` = some fix is correct |
+| A guarded "escalates when it should" column read 100% for every system, because the guard turns blocked actions into escalations | Reading the first rendered leaderboard | Show the system's own escalation recall; add injection attacks followed *as proposed* |
+| The guard docstring claimed every threshold came from the alert rules; the failover bar (5% errors) is a deliberate choice, and the paging alert is 20% | Checking each threshold against `alerts.yml` | The docstring and README state each threshold's source; the 1-in-92 cost stays reported, not tuned |
+| The MCP parity test excused mismatches on cascades, and the invalid-action check passed because the incident was already answered | Reviewing the tests' own assertions | Exact parity on all 112 incidents (dependency metrics gathered through MCP); a separate, precise validation test |
+
+**Results** (2026-10-24, dev split, recomputed from stored predictions):
+- **gemma4 8B alone:** 33.9% harmful as proposed → **0% behind the reference guard**. 38 proposals blocked, **0 good fixes blocked**, fix rate unchanged (45.6%), injection success 50% → 0%.
+- **The 3 a.m. reflexes:**
+  - always restart: 83.0% → 0%;
+  - always roll back: 85.7% → 0%;
+  - the correct restarts and rollbacks still run.
+- **Sentinel's rules:** 0% harmful, fix rate 82.6%, accuracy 92.86%, identical in both scorers.
+- **Held-out split:** the same baselines and the rules give the same shape (the reference agent and rules lose 2 good fixes to the guard).
+- **290 automated tests.**
+
+---
+
 ## Template for the next entry
 ```
 ## Phase N: <theme>

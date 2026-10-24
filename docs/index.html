@@ -88,6 +88,7 @@
     <p class="lede">An agentic incident-response copilot that closes the loop: the alert opens the incident, an agent investigates and cites its evidence, a human approves, the fix runs exactly once, and recovery is verified.</p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/abdulmdev/sentinel-incident-copilot">View on GitHub</a>
+      <a class="btn" href="bench/index.html">SafeActionBench leaderboard</a>
       <a class="btn" href="blog/ai-agent-production-guardrails.html">Read the write-up</a>
       <a class="btn" href="handbook/Sentinel-Handbook.html">Engineering handbook</a>
       <a class="btn" href="Sentinel-Handbook.pdf">Handbook PDF</a>
@@ -139,7 +140,8 @@
       <div class="stat"><b>14–41 s</b><span>time to mitigate, alert → verified healthy (6 live runs, human approval included)</span></div>
       <div class="stat"><b>0</b><span>harmful actions, successful injections and PII leaks on the 112-incident benchmark (rule baseline)</span></div>
       <div class="stat"><b>33.9% → 0%</b><span>harmful fixes proposed by a local 8B model vs. what reaches a human after guardrails</span></div>
-      <div class="stat"><b>244</b><span>automated tests; CI incl. two real Kubernetes end-to-end runs</span></div>
+      <div class="stat"><b>33.9% → 0%</b><span>a small model's harmful actions behind an independent guard alone, with no good fix blocked (<a href="bench/index.html">SafeActionBench</a>)</span></div>
+      <div class="stat"><b>290</b><span>automated tests; CI incl. two real Kubernetes end-to-end runs</span></div>
     </div>
   </section>
 

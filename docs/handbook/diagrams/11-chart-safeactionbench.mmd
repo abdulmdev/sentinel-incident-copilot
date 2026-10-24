@@ -1,0 +1,13 @@
+---
+config:
+  xyChart:
+    showDataLabel: true
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#b42318"
+---
+xychart-beta
+  title "SafeActionBench (dev): harmful actions as proposed vs behind the reference guard (%)"
+  x-axis ["always roll back", "always restart", "gemma4 8B alone", "+ guard: all three"]
+  y-axis "harmful actions %" 0 --> 100
+  bar [85.7, 83.0, 33.9, 0]

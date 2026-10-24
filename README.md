@@ -52,6 +52,21 @@ Approved ar-c8f4166c-1: scale of shop/deployment/checkout (replicas: 2 → 3), b
 
 Also `kubectl apply -f install.yaml`, `docker run ghcr.io/abdulmdev/sentinel-guard` (single process, HTTP API for agents outside Kubernetes), and `kubectl krew install sentinel/sentinel`. **[Sentinel Guard docs →](docs/guard/README.md)**
 
+## 📊 SafeActionBench: how often do agents' actions cause harm?
+
+An open, deterministic benchmark of **224 replayed production incidents**: red herrings, missing data and prompt injection hidden in log lines.
+- **What it scores:** the one action an agent proposes for each incident, as **harmful**, as a **correct fix**, or as an **escalation** to a human.
+- **Three levels:** as proposed, after the system's own checks, and behind an independent **reference guard** that sees only metrics and deploy history.
+- **Any MCP agent can take it,** with no code: `safeactionbench serve`.
+
+| dev split | Harmful, as proposed | Behind the reference guard | Fix rate |
+|---|---|---|---|
+| Always restart (the 3 a.m. reflex) | 83.0% | 0.0% | 20.6% |
+| gemma4 8B, the model alone | 33.9% | **0.0%** (38 blocked, no good fix lost) | 45.6% |
+| Sentinel's rules | 0.0% | 0.0% | 82.6% |
+
+The incidents are synthetic, so the guarded numbers are an upper bound; the benchmark says so on its own page. **[Leaderboard →](https://abdulmdev.github.io/sentinel-incident-copilot/bench/)** · **[Take it →](bench/README.md)**
+
 ## ✈️ Why Sentinel exists: the cockpit idea
 
 > **Airliners don't rely on a pilot's nerve at 3 a.m. On-call engineers shouldn't have to either.**
@@ -94,7 +109,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 | **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **277** automated tests (incl. 34 for Sentinel Guard and 25 for its SDKs), plus 25 Guard checks on a real API server; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **290** automated tests (incl. 34 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 25 Guard checks on a real API server; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 
@@ -231,6 +246,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 | 10 Sentinel Guard (v2 alpha) | The safety core as a Kubernetes-native Go service for any agent; exactly-once proven on a real API server, including its write retries; p99 **42.9 ms** for an approved change |
 | 11 The copilot on the guard | One safety core: the agent proposes to the guard, console approvals are recorded there by the gateway, the adapter redeems the guard's capability; live: alert → **verified fix in 24.4 s** |
 | 12 SDKs and the MCP proxy | Python and TypeScript SDKs, a LangChain/LangGraph wrapper and a zero-code MCP proxy, tested against the real guard |
+| 13 SafeActionBench | The incident benchmark as an open benchmark for any agent and any guard; an independent guard alone took a small model from 33.9% to 0% harmful |
 
 <details>
 <summary><b>All design decisions and their reasons</b></summary>

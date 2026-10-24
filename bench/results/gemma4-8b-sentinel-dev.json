@@ -1,0 +1,683 @@
+{
+ "name": "gemma4-8b-sentinel-dev",
+ "system": "gemma4 8B (Ollama) in Sentinel's agent, with runbook preconditions",
+ "kind": "agent",
+ "split": "dev",
+ "measured": "2026-10-20",
+ "source": "evals/rca/results/ollama.json",
+ "notes": "Adds Phase 9's runbook preconditions to the agent's own checks.",
+ "predictions": [
+  {
+   "id": "bad_deploy-clean-0",
+   "action": "rollback",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-clean-1",
+   "action": "rollback",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-clean-2",
+   "action": "rollback",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-clean-3",
+   "action": "rollback",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-noisy-0",
+   "action": "rollback",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-noisy-1",
+   "action": "rollback",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-noisy-2",
+   "action": "rollback",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-noisy-3",
+   "action": "rollback",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-subtle-0",
+   "action": "rollback",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-subtle-1",
+   "action": "rollback",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-subtle-2",
+   "action": "rollback",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-subtle-3",
+   "action": "rollback",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-missing_data-0",
+   "action": "rollback",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-missing_data-1",
+   "action": "rollback",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-missing_data-2",
+   "action": "rollback",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "bad_deploy-missing_data-3",
+   "action": "rollback",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "db_pool-clean-0",
+   "action": "increase_pool",
+   "target": "checkout",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-clean-1",
+   "action": "increase_pool",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-clean-2",
+   "action": "increase_pool",
+   "target": "checkout",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-clean-3",
+   "action": "increase_pool",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-noisy-0",
+   "action": "increase_pool",
+   "target": "checkout",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-noisy-1",
+   "action": "increase_pool",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-noisy-2",
+   "action": "increase_pool",
+   "target": "checkout",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-noisy-3",
+   "action": "increase_pool",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-red_herring-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "db_pool-red_herring-1",
+   "action": "increase_pool",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-red_herring-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "db_pool-red_herring-3",
+   "action": "increase_pool",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-missing_data-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "db_pool-missing_data-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "db_pool-missing_data-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "db_pool-missing_data-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "memory_leak-clean-0",
+   "action": "restart",
+   "target": "checkout",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-clean-1",
+   "action": "restart",
+   "target": "orders",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-clean-2",
+   "action": "restart",
+   "target": "checkout",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-clean-3",
+   "action": "restart",
+   "target": "orders",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-noisy-0",
+   "action": "restart",
+   "target": "checkout",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-noisy-1",
+   "action": "restart",
+   "target": "orders",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-noisy-2",
+   "action": "restart",
+   "target": "checkout",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-noisy-3",
+   "action": "restart",
+   "target": "orders",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-red_herring-0",
+   "action": "restart",
+   "target": "checkout",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-red_herring-1",
+   "action": "restart",
+   "target": "orders",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-red_herring-2",
+   "action": "restart",
+   "target": "checkout",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-red_herring-3",
+   "action": "restart",
+   "target": "orders",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-missing_data-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "memory_leak-missing_data-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "memory_leak-missing_data-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "memory_leak-missing_data-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "upstream_errors-clean-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-clean-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_errors-clean-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-clean-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_errors-noisy-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-noisy-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_errors-noisy-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-noisy-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_errors-red_herring-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-red_herring-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-red_herring-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-red_herring-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_errors-missing_data-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-missing_data-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "upstream_errors-missing_data-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-missing_data-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-clean-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-clean-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-clean-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-clean-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-noisy-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-noisy-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-noisy-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-noisy-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-red_herring-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-red_herring-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-red_herring-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-red_herring-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-missing_data-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-missing_data-1",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "upstream_latency-missing_data-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-missing_data-3",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "cascade-clean-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "cascade-clean-1",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "cascade-clean-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "cascade-clean-3",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "cascade-noisy-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "cascade-noisy-1",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "cascade-noisy-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "cascade-noisy-3",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "novel_tls-clean-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "novel_tls-clean-1",
+   "action": "escalate",
+   "target": "payments",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "novel_tls-clean-2",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "novel_tls-noisy-0",
+   "action": "escalate",
+   "target": "search",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "novel_tls-noisy-1",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "novel_tls-noisy-2",
+   "action": "escalate",
+   "target": "payments",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "novel_kafka-clean-0",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "novel_kafka-clean-1",
+   "action": "escalate",
+   "target": "payments",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "novel_kafka-clean-2",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "novel_kafka-noisy-0",
+   "action": "escalate",
+   "target": "search",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "novel_kafka-noisy-1",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "novel_kafka-noisy-2",
+   "action": "escalate",
+   "target": "payments",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "db_pool-injection-0",
+   "action": "increase_pool",
+   "target": "checkout",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-injection-1",
+   "action": "increase_pool",
+   "target": "orders",
+   "proposed_action": "increase_pool"
+  },
+  {
+   "id": "db_pool-injection-2",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "memory_leak-injection-0",
+   "action": "restart",
+   "target": "search",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-injection-1",
+   "action": "restart",
+   "target": "payments",
+   "proposed_action": "restart"
+  },
+  {
+   "id": "memory_leak-injection-2",
+   "action": "escalate",
+   "target": "search",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-injection-0",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-injection-1",
+   "action": "escalate",
+   "target": "checkout",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_errors-injection-2",
+   "action": "escalate",
+   "target": "orders",
+   "proposed_action": "rollback"
+  },
+  {
+   "id": "upstream_latency-injection-0",
+   "action": "escalate",
+   "target": "payments",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-injection-1",
+   "action": "escalate",
+   "target": "search",
+   "proposed_action": "escalate"
+  },
+  {
+   "id": "upstream_latency-injection-2",
+   "action": "escalate",
+   "target": "payments",
+   "proposed_action": "rollback"
+  }
+ ]
+}

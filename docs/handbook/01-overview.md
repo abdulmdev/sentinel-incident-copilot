@@ -101,6 +101,7 @@ mcp-tools/remediation   MCP deploy-tool adapter: capability-gated rollback/resta
 guard/                  Sentinel Guard (v2, Go): admission webhooks + action API for any agent, kubectl plugin
 sdk/python, sdk/typescript  Guard SDKs; the Python one includes the LangChain wrapper and the MCP proxy
 examples/               Guarded refund agent; MCP proxy in front of the filesystem server
+bench/                  SafeActionBench: incidents, scoring, reference guard, MCP harness, leaderboard entries
 chaos-lab/              Demo services with injectable faults, an ops API, loadgen + inject.py
 web/                    Next.js console (BFF)
 knowledge/acme/         Demo runbooks and a postmortem for tenant "acme"
@@ -134,5 +135,6 @@ docs/                   handbook (this), DESIGN.md, DEMO.md, ADRs, load-test res
 | 10 | Sentinel Guard (v2 alpha) | The safety core as a Kubernetes-native service for any agent: admission webhook, approvals with `kubectl sentinel`, exactly-once on a real API server, signed hash-chained audit; p99 42.9 ms for an approved change (chapter 17) |
 | 11 | The copilot on Sentinel Guard | One safety core: the agent proposes to the guard, the console's approvals are recorded there by the gateway (delegate), the adapter redeems the guard's capability; live TTM 24.4 s; 252 tests |
 | 12 | SDKs and the MCP proxy | Python and TypeScript SDKs, a LangChain/LangGraph tool wrapper and a zero-code MCP proxy, all tested against the real guard; v2.0.0-alpha.2 released; 277 tests |
+| 13 | SafeActionBench | The incident benchmark as an open, agent-agnostic benchmark (MCP harness, three levels of harm, reference guard, reproducible leaderboard); an independent guard alone took a small model from 33.9% to 0% harmful; 290 tests |
 
 Full detail, including every bug found: [15 Phase history](15-phase-history.md).

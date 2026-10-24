@@ -2,7 +2,7 @@
 
 The complete reference for Sentinel: what it is, how it's designed (high level and low level), why each decision was made, how it's tested, deployed and operated, and what happened in each phase of building it.
 
-> **Status:** current as of **Phase 12: SDKs and the MCP proxy (2026-10-24)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
+> **Status:** current as of **Phase 13: SafeActionBench (2026-10-24)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
 
 ## How to read it
 
@@ -14,7 +14,7 @@ The complete reference for Sentinel: what it is, how it's designed (high level a
 | Know what's stored where | [08 Data model](08-data-model.md) |
 | Call or change an API | [09 APIs & contracts](09-api-and-contracts.md) |
 | Review security | [10 Security](10-security.md) |
-| Change prompts, models, rules or guardrails | [11 Evaluation](11-evaluation.md) (the benchmark gate decides) |
+| Change prompts, models, rules or guardrails | [11 Evaluation](11-evaluation.md) (the benchmark gate decides; SafeActionBench in §2A) |
 | Debug in production | [12 Observability](12-observability.md) and [13 Deployment & operations](13-deployment-and-operations.md) |
 | Add or change tests / CI | [14 Testing & CI](14-testing-and-ci.md) |
 | Know how we got here and what broke along the way | [15 Phase history](15-phase-history.md) |
@@ -25,10 +25,10 @@ The complete reference for Sentinel: what it is, how it's designed (high level a
 - [`docs/Sentinel-Handbook.pdf`](../Sentinel-Handbook.pdf): A4, cover, contents, page numbers.
 - [`Sentinel-Handbook.html`](Sentinel-Handbook.html): self-contained, opens in any browser.
 
-Shorter companions: the [user guide](../USER-GUIDE.md), the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the twelve [architecture decision records](../adr/).
+Shorter companions: the [user guide](../USER-GUIDE.md), the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the thirteen [architecture decision records](../adr/).
 
 ## Figures
-The handbook has **75 diagrams and charts** (architecture, sequence, state, ER, deployment, flowcharts, data charts) and **15 screenshots of the running system** (console incl. the closed loop, Jaeger, Grafana, Prometheus targets and alerts). Every figure is numbered and captioned.
+The handbook has **76 diagrams and charts** (architecture, sequence, state, ER, deployment, flowcharts, data charts) and **15 screenshots of the running system** (console incl. the closed loop, Jaeger, Grafana, Prometheus targets and alerts). Every figure is numbered and captioned.
 
 | Kind | Source (edit this) | Rendered to | How |
 |---|---|---|---|

@@ -45,6 +45,16 @@ jobs:
       - run: go test -race ./...
       - run: go build ./cmd/sentinel-guard ./cmd/kubectl-sentinel
 
+  bench:
+    # SafeActionBench: the data matches its source byte for byte, scoring and the MCP harness behave,
+    # and the published leaderboard page is exactly what the stored predictions produce.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - working-directory: bench
+        run: uv run --frozen pytest
+
   sdks:
     # The Python and TypeScript SDKs (incl. the MCP proxy) against the real guard binary, not mocks.
     runs-on: ubuntu-latest

@@ -38,6 +38,8 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 | SDKs | Not published to PyPI/npm (installed from the repository); no Java SDK; no native Claude Agent SDK or OpenAI Agents SDK adapters (MCP-based agents are covered by the proxy) | Friction for teams that only install from registries | Publish on release (needs the maintainer's PyPI/npm accounts); adapters on the same contract |
 | SDKs | The decorator and `guard_tool` redeem the capability inside the agent's own process | They stop the model's mistakes and manipulation, not a compromised process (stated in the docs, ADR-0012) | Redeem in a separate executor, put the proxy between the agent and the server, or use the webhook |
 | MCP proxy | stdio towards the client only (no HTTP server mode); one upstream per proxy | Remote MCP clients can't use it yet | A streamable-HTTP server mode; several upstreams |
+| SafeActionBench | Synthetic incidents (one author for generator and labels); each fault has one clean defining metric, so the reference guard's guarded numbers are an upper bound | Real-world guards will block less harm and more good fixes | Recorded chaos-lab incidents and anonymized real postmortems; a second labeller |
+| SafeActionBench | No frontier-model entries yet (Claude, GPT); the reference guard is single-threshold and metrics-only | The board compares a small local model, rules and baselines | Run the MCP harness with frontier agents (needs API keys); a richer reference policy |
 
 ## 2. Roadmap (proposed order)
 
@@ -45,7 +47,7 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 
 *Figure 16.1: Roadmap items by impact and effort*
 
-0. **Sentinel Guard, next** (v2): verify the reviewer's OIDC token at the guard; publish the SDKs (PyPI, npm); native Claude Agent SDK and OpenAI Agents SDK adapters; a Java SDK; retention with signed export; Slack approvals; Kyverno/Gatekeeper packs; the SafeActionBench benchmark.
+0. **Sentinel Guard, next** (v2): frontier-model entries on SafeActionBench; verify the reviewer's OIDC token at the guard; publish the SDKs (PyPI, npm); native Claude Agent SDK and OpenAI Agents SDK adapters; a Java SDK; retention with signed export; Slack approvals; Kyverno/Gatekeeper packs; the SafeActionBench benchmark.
 1. **Claude column** (needs an API key); improve the local model's accuracy on red-herring and injection tiers (currently 33–38%: safe, but escalated).
 2. **Real-world benchmark data:** record chaos-lab incidents; import anonymized postmortems.
 3. **Identity, next:** KMS-backed signing; mTLS/SPIFFE between pods; egress NetworkPolicies.
@@ -57,3 +59,4 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 *Done in Phase 8:* OIDC users, asymmetric (ES256) service tokens with a JWKS, gateway ↔ agent service identity, checkpoint RLS, revocable integration tokens.
 *Done in Phase 11:* the incident copilot runs on Sentinel Guard (one approval and capability path).
 *Done in Phase 12:* SDKs (Python, TypeScript) and an MCP proxy for agents outside Kubernetes.
+*Done in Phase 13:* SafeActionBench, the open benchmark with an MCP harness and a reproducible leaderboard.

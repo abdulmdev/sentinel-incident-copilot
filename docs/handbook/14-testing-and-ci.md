@@ -1,9 +1,10 @@
 # 14 Testing and CI
 
-**277 automated tests** (measured 2026-10-24; 252 after Phase 11, 244 after Phase 10, 212 before it):
+**290 automated tests** (measured 2026-10-24; 277 after Phase 12, 252 after Phase 11, 244 after Phase 10, 212 before it):
 
 | Suite | Tests |
 |---|---|
+| SafeActionBench | 13 |
 | Python SDK + MCP proxy | 19 (against the real guard binary) |
 | TypeScript SDK | 6 (against the real guard binary) |
 | gateway | 93 (67 unit/slice + 26 integration) |
@@ -132,6 +133,16 @@ uv run --project agent-service python evals/rca/run.py --check
   - the plain-HTTP API listener serves no admission webhooks;
   - an ActionRequest's round trip through JSON keeps the audit valid.
 
+### SafeActionBench (13; `bench/`: `uv run pytest`)
+- **Data:** the packaged splits and runbooks are byte-identical to `evals/rca` and `knowledge/acme`; split sizes and labels; the public incident never leaks labels.
+- **The reference guard:** its rules on known incidents (a red-herring deploy is refused, the right pool change is allowed); it blocks exactly 1 (dev) and 2 (test) correct fixes on the labels.
+- **Scoring:**
+  - the definitions (a perfect submission, an empty one, always-restart's 83.04% → 0% guarded, unknown ids rejected);
+  - proposed vs final vs guarded on one incident;
+  - tool outages follow the dataset.
+- **MCP harness:** a reference agent driven through the MCP server makes **exactly** the same 112 decisions as when called directly. Proposals are validated (unknown incident, invalid action, one per incident). `safeactionbench serve` works over stdio, the way an MCP client launches it.
+- **Reproducibility:** the CLI scores; `docs/bench/index.html` equals what `bench/results/*.json` render; the figures quoted in the docs are recomputed from the stored predictions.
+
 ### SDKs (Phase 12; `sdk/python`: `uv run pytest`, `sdk/typescript`: `npm test`)
 Both start the real guard (memory mode; built from `guard/`, or `SENTINEL_GUARD_BIN`) and approve through its admin API, as a human would.
 - **Python client (9):**
@@ -185,6 +196,7 @@ Each metric's definition, including the edge cases: wrong escalation isn't harmf
 | `docs` | `scripts/check_docs.py`: every Markdown link resolves; every Flyway migration in chapter 08; every env var read by code in chapter 13; every metric in chapter 12 | Docs in sync with code |
 | `web` | `npm ci && npm run build` | Build + types |
 | `deploy-config` | `helm lint` (both charts); `helm template \| kubeconform -strict` for defaults/kind/aws; **`check_chart_secrets.py`** (`--prod`: signing keys only in the gateway, no dev secret anywhere; kind: no signing material outside the gateway/web); `terraform fmt -check`, `init -backend=false`, `validate` | Validity + least privilege |
+| `bench` | `uv run --frozen pytest` in `bench/`: the data equals its source byte for byte; scoring, the reference guard, the MCP harness (exact parity, all 112 incidents) and `serve` over stdio; **the leaderboard page equals what the stored predictions render** | Tests + reproducibility |
 | `sdks` | Builds the guard once; the Python SDK + MCP proxy (`uv run --frozen pytest`) and the TypeScript SDK (`npm ci`, build, `node --test`) against it | Tests |
 | `guard` | `gofmt` check, `go vet`, `go test -race ./...`, both binaries build (`deploy-config` also lints the guard chart and validates it with kubeconform; the CRD itself is validated by the real API server in `guard-e2e`) | Tests |
 | `guard-e2e` (needs guard, deploy-config) | `scripts/guard-e2e.sh` with `LOAD=1 LOAD_N=100` on a fresh kind cluster (section 4A) | End to end on a real API server |

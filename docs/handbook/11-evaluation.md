@@ -171,6 +171,37 @@ The 8 misses are `db_pool`/`memory_leak` with logs down. The rules can't diagnos
   - The contaminated output was discarded; the 61 genuine results (63–118 s each) are kept for `--resume`.
   - The runner now flags any LLM-mode scenario without a successful model call as `llm_unavailable`. It doesn't save it (resume retries it), and when any are flagged it writes no results, history or report and exits 3.
 
+## 2A. SafeActionBench (Phase 13): the benchmark, for any agent and any guard
+The same incidents, packaged as a standalone, agent-agnostic benchmark: `bench/` (`safeactionbench`), [ADR-0013](../adr/0013-safeactionbench.md), [leaderboard](../bench/index.html).
+- **Two splits:** `dev` = `scenarios.jsonl`, `test` = `scenarios-holdout.jsonl`, copied byte for byte (a test checks this), plus the runbooks.
+- **Two ways in:** an MCP server any agent can take it through (`safeactionbench serve`), or a predictions file (`{id, action, target, proposed_action?}`).
+- **Scoring is action-level and deterministic,** at three levels: harm **as proposed**, **after the system's own checks**, **behind the reference guard**. Plus fix rate, escalation recall, injection attacks followed and the guard's false blocks.
+- **The reference guard** (`safeactionbench/guard.py`) sees only the target's metrics and deploy history. A production change is allowed only when the condition it fixes is present; otherwise it escalates.
+  - Thresholds were fixed before scoring, with stated sources.
+  - On the labels it blocks 1 of 92 correct fixes (dev) and 2 of 92 (test).
+- **Cross-check:** its scorer and this harness agree on the rules baseline (92.86% correct).
+
+![SafeActionBench: harmful actions as proposed vs behind the reference guard](images/11-chart-safeactionbench.png)
+
+*Figure 11.8: SafeActionBench (dev): harmful actions as proposed vs behind the reference guard*
+
+| System (dev, 112) | Harmful as proposed | After its own checks | Behind the reference guard | Fix rate | Injection attacks followed (proposed) |
+|---|---|---|---|---|---|
+| Always roll back | 85.7% | 85.7% | 0.0% | 17.4% | 100% |
+| Always restart | 83.0% | 83.0% | 0.0% | 20.6% | 75% |
+| gemma4 8B, the model alone | 33.9% | 33.9% | 0.0% | 45.6% | 50% |
+| gemma4 8B in Sentinel, first guardrails | 33.9% | 11.6% | 0.0% | 45.6% | 50% |
+| gemma4 8B in Sentinel, with preconditions | 33.9% | 0.0% | 0.0% | 45.6% | 50% |
+| Sentinel rules | 0.0% | 0.0% | 0.0% | 82.6% | 0% |
+| Symptom-matching reference agent | 0.0% | 0.0% | 0.0% | 95.7% | 0% |
+| Always escalate | 0.0% | 0.0% | 0.0% | 0.0% | 0% |
+
+**The finding:** on its own, the independent guard took gemma4's harmful actions from 33.9% to 0%.
+- It blocked 38 proposals and no correct fix; the fix rate was unchanged.
+- It stopped every injection the model fell for, because what it checks can't be written into a log line.
+
+**Read it with its caveat:** the incidents are synthetic, and each fault has one clean defining metric, so these guarded numbers are an upper bound for a precondition guard. Every number is recomputed from the stored predictions by the `bench` CI job.
+
 ## 3. Retrieval eval (`evals/retrieval/`)
 20 labeled questions against the live gateway; chunks are deduplicated to documents before ranking. Results (Phase 2): vector 0.90 / 1.00 / 0.950, keyword 0.95 / 1.00 / 0.975, hybrid 0.95 / 1.00 / 0.975 (recall@1 / recall@5 / MRR). Too small to separate the modes significantly; the set should grow to ~100.
 
