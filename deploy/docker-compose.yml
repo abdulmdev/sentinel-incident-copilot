@@ -150,6 +150,23 @@ services:
       SERVICE_NAME: inventory
     ports: ["8102:8000"]
 
+  web:   # the console (BFF) on :3000: sign in with Keycloak (dev users in deploy/keycloak/sentinel-realm.json) or the dev login
+    build: ../web
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      PUBLIC_URL: http://localhost:3000
+      OIDC_ISSUER: http://localhost:8180/realms/sentinel          # what the browser sees
+      OIDC_INTERNAL_ISSUER: http://keycloak:8080/realms/sentinel  # server-to-server, inside the network
+      OIDC_CLIENT_ID: sentinel-console
+      OIDC_CLIENT_SECRET: ${SENTINEL_CONSOLE_CLIENT_SECRET:-dev-console-secret}
+      SENTINEL_DEV_LOGIN: "true"
+      SENTINEL_INSECURE_COOKIES: "true"   # plain HTTP on localhost
+      SENTINEL_JWT_SECRET: ${SENTINEL_JWT_SECRET:-dev-only-secret-change-me-0123456789abcdef}
+    ports: ["3000:3000"]
+    depends_on:
+      gateway: { condition: service_started }
+      keycloak: { condition: service_healthy }
+
   keycloak:   # users' identity provider (OIDC); dev realm with alice@acme, bob@acme, carol@globex
     image: keycloak/keycloak:26.4
     command: ["start-dev", "--import-realm", "--hostname=http://localhost:8180", "--hostname-backchannel-dynamic=true"]

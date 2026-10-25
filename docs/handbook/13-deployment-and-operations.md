@@ -38,6 +38,7 @@ Then:
 Default services:
 - postgres :5432, kafka :9092 (external) / 19092 (internal), redis :6379, jaeger :16686 / :4318;
 - ingestion (internal 8090; owns migrations), gateway :8080, agent :8000, mcp-observability :8200, **mcp-remediation :8300**, checkout :8101, inventory :8102.
+- **web :3000**, the console (BFF). Sign in through Keycloak (the browser uses `localhost:8180`; the server uses `keycloak:8080` via `OIDC_INTERNAL_ISSUER`) or the dev login; cookies aren't marked Secure on plain HTTP (`SENTINEL_INSECURE_COOKIES`).
 
 Keycloak :8180 runs by default (dev realm imported; the gateway trusts it as the OIDC issuer). `--profile observability` adds Prometheus :9090 (with alert rules), **Alertmanager :9093** (+ the `alertmanager-token` one-shot), **loadgen**, and Grafana :3001. Without that profile no alerts fire, and incidents are opened by hand as before.
 

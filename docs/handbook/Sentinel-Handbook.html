@@ -4759,6 +4759,7 @@ uv run --project agent-service python evals/rca/run.py --mode llm --max-usd 15  
 <ul>
 <li>postgres :5432, kafka :9092 (external) / 19092 (internal), redis :6379, jaeger :16686 / :4318;</li>
 <li>ingestion (internal 8090; owns migrations), gateway :8080, agent :8000, mcp-observability :8200, <strong>mcp-remediation :8300</strong>, checkout :8101, inventory :8102.</li>
+<li><strong>web :3000</strong>, the console (BFF). Sign in through Keycloak (the browser uses <code>localhost:8180</code>; the server uses <code>keycloak:8080</code> via <code>OIDC_INTERNAL_ISSUER</code>) or the dev login; cookies aren&#39;t marked Secure on plain HTTP (<code>SENTINEL_INSECURE_COOKIES</code>).</li>
 </ul>
 <p>Keycloak :8180 runs by default (dev realm imported; the gateway trusts it as the OIDC issuer). <code>--profile observability</code> adds Prometheus :9090 (with alert rules), <strong>Alertmanager :9093</strong> (+ the <code>alertmanager-token</code> one-shot), <strong>loadgen</strong>, and Grafana :3001. Without that profile no alerts fire, and incidents are opened by hand as before.</p>
 <p>Java images package a pre-built jar, so run <code>scripts/build-images.sh</code> first (or <code>mvn package</code> + copy the model). Shared anchors: <code>x-java-env</code> (datasource, Kafka, app DB password, OTLP export) and <code>x-llm-env</code> (provider, key, Ollama URL <code>http://host.docker.internal:11434</code>, model).</p>
