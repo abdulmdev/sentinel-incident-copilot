@@ -89,7 +89,9 @@ else die "$(cat "$WORK/verify.txt")"; fi
 kubectl get actionrequests.v1alpha1.sentinel.dev -n $NS "$DONE" >/dev/null 2>&1 || die "v1alpha1 should still be served"
 ok "old clients can still read the v1alpha1 API"
 
-kubectl sentinel approve "$WAITING" | grep -q "Approved $WAITING" || die "approving the request left pending across the upgrade"
+out=$(kubectl sentinel approve "$WAITING" 2>&1) || die "approving the request left pending across the upgrade: $out"
+grep -qE "Approved $WAITING|Recorded your decision on $WAITING" <<<"$out" || die "unexpected answer to the approval: $out"
+# The agent's retry applies a recorded decision itself, whatever the housekeeping lease is doing.
 agent -n shop scale deploy/web --replicas=4 >/dev/null 2>&1 || die "the request approved after the upgrade was not admitted"
 out=$(agent -n shop scale deploy/web --replicas=3 2>&1) && die "a different change rode on the approval"
 ok "a request left pending across the upgrade is approved and admitted once"

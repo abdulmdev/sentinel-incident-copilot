@@ -793,6 +793,9 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 - **A stable API:** the ActionRequest CRD serves `sentinel.dev/v1` (stored) and `v1alpha1` (deprecated, same schema), and the guard checks at startup that `v1` is served (ADR-0018).
 - **An upgrade test** from the published 2.0.0-alpha.3 (`scripts/guard-upgrade-e2e.sh`, in CI): 8/8 on the first run.
 - **Every version** set to 2.0.0: chart, image, both SDKs, install commands. The docs no longer say alpha.
+- **Found by the new upgrade job in CI:** right after the guards restart, `kubectl sentinel approve` could answer "recorded … not applied yet". It waited 15 s for the guard to apply the decision, exactly the housekeeping lease's duration, which may still be free at that point.
+  - The plugin now waits up to 30 s.
+  - The test checks what matters to a user: the agent's retry is admitted once. A retry applies a recorded decision itself.
 - **A test race fixed:** `TestNotifications` read the `sent` counter before the notifier had counted its second delivery. The sink records a notice before its answer reaches the notifier. It now waits for the count, and passed 20 runs in a row under the race detector.
 
 ---

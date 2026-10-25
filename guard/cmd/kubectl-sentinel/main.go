@@ -334,8 +334,9 @@ func (c *client) decide(ctx context.Context, id, verb, note string) error {
 			last.By, r.ID, r.Action, r.Target, changeText(r), len(r.Approvals), r.Needed(), r.Needed()-len(r.Approvals))
 		return nil
 	}
-	// The guard applies the decision within a couple of seconds; wait so the answer is final.
-	deadline := time.Now().Add(15 * time.Second)
+	// The guard applies the decision within a couple of seconds; wait so the answer is final. Right after
+	// the guard restarts, its housekeeping lease (15 s) may still be free, so allow twice that.
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		r, err := c.kube.Get(ctx, id)
 		if err != nil {

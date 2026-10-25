@@ -6456,7 +6456,7 @@ uv run --project agent-service python evals/rca/run.py --check
 <li>the plugin, which speaks v1, lists the old records;</li>
 <li><code>kubectl sentinel audit verify</code> passes on the events the alpha signed;</li>
 <li><code>actionrequests.v1alpha1.sentinel.dev</code> is still readable;</li>
-<li>the request left pending is approved with the new plugin and admitted once, and a different change is not;</li>
+<li>the request left pending is approved with the new plugin (applied, or recorded for the guard to apply) and the agent&#39;s retry is admitted once, and a different change is not;</li>
 <li>the chain verifies with events from both versions.</li>
 </ul>
 </li>
@@ -7851,6 +7851,11 @@ uv run --project agent-service python evals/rca/run.py --check
 <li><strong>A stable API:</strong> the ActionRequest CRD serves <code>sentinel.dev/v1</code> (stored) and <code>v1alpha1</code> (deprecated, same schema), and the guard checks at startup that <code>v1</code> is served (ADR-0018).</li>
 <li><strong>An upgrade test</strong> from the published 2.0.0-alpha.3 (<code>scripts/guard-upgrade-e2e.sh</code>, in CI): 8/8 on the first run.</li>
 <li><strong>Every version</strong> set to 2.0.0: chart, image, both SDKs, install commands. The docs no longer say alpha.</li>
+<li><strong>Found by the new upgrade job in CI:</strong> right after the guards restart, <code>kubectl sentinel approve</code> could answer &quot;recorded … not applied yet&quot;. It waited 15 s for the guard to apply the decision, exactly the housekeeping lease&#39;s duration, which may still be free at that point.<ul>
+<li>The plugin now waits up to 30 s.</li>
+<li>The test checks what matters to a user: the agent&#39;s retry is admitted once. A retry applies a recorded decision itself.</li>
+</ul>
+</li>
 <li><strong>A test race fixed:</strong> <code>TestNotifications</code> read the <code>sent</code> counter before the notifier had counted its second delivery. The sink records a notice before its answer reaches the notifier. It now waits for the count, and passed 20 runs in a row under the race detector.</li>
 </ul>
 <hr>

@@ -348,7 +348,7 @@ On a fresh kind cluster:
    - the plugin, which speaks v1, lists the old records;
    - `kubectl sentinel audit verify` passes on the events the alpha signed;
    - `actionrequests.v1alpha1.sentinel.dev` is still readable;
-   - the request left pending is approved with the new plugin and admitted once, and a different change is not;
+   - the request left pending is approved with the new plugin (applied, or recorded for the guard to apply) and the agent's retry is admitted once, and a different change is not;
    - the chain verifies with events from both versions.
 
 Last run: 8/8, 2026-10-25.
