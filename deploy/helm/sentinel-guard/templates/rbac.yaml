@@ -1,4 +1,4 @@
-# The guard's own permissions: its state (ActionRequests, two ConfigMaps, two Secrets it creates
+# The guard's own permissions: its state (ActionRequests, three ConfigMaps, two Secrets it creates
 # on first start) in its namespace, its two webhook configurations (CA bundle), and TokenReviews.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -18,7 +18,7 @@ rules:
     verbs: [create]
   - apiGroups: [""]
     resources: [configmaps]
-    resourceNames: [sentinel-guard-audit-head, sentinel-guard-jwks]
+    resourceNames: [sentinel-guard-audit-head, sentinel-guard-jwks, sentinel-guard-policies]
     verbs: [get, update, list, watch]
   # One replica at a time does housekeeping (applying decisions, expiries).
   - apiGroups: [coordination.k8s.io]
@@ -75,7 +75,7 @@ subjects:
   - {kind: ServiceAccount, name: sentinel-guard, namespace: {{ .Release.Namespace }}}
 ---
 # Approvers: see requests, approve or deny them (the webhook still refuses agents and the requester),
-# and read the public keys and chain head to verify the audit trail.
+# and read the public keys, chain head and policy versions to verify or export the audit trail.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -87,7 +87,7 @@ rules:
     verbs: [get, list, watch, patch]
   - apiGroups: [""]
     resources: [configmaps]
-    resourceNames: [sentinel-guard-audit-head, sentinel-guard-jwks]
+    resourceNames: [sentinel-guard-audit-head, sentinel-guard-jwks, sentinel-guard-policies]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -101,7 +101,7 @@ rules:
     verbs: [get, list, watch]
   - apiGroups: [""]
     resources: [configmaps]
-    resourceNames: [sentinel-guard-audit-head, sentinel-guard-jwks]
+    resourceNames: [sentinel-guard-audit-head, sentinel-guard-jwks, sentinel-guard-policies]
     verbs: [get]
 {{- if or .Values.approvers.users .Values.approvers.groups }}
 ---

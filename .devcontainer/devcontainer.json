@@ -1,0 +1,22 @@
+// One click from the README ("Open in GitHub Codespaces"): the Sentinel Guard demo, ready to run.
+//   scripts/guard-demo.sh              the walkthrough (about a minute)
+//   scripts/guard-demo.sh kubernetes   the admission webhook on a kind cluster (Docker in the container)
+{
+  "name": "Sentinel Guard demo",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": {"version": "latest"},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {"minikube": "none"}
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postAttachCommand": "scripts/guard-demo.sh welcome",
+  "remoteEnv": {
+    // kubectl finds the plugin here, so `kubectl sentinel ...` works in the terminal
+    "PATH": "${containerWorkspaceFolder}/.demo/bin:${containerEnv:HOME}/.local/bin:${containerEnv:PATH}"
+  },
+  "customizations": {
+    "codespaces": {"openFiles": ["examples/walkthrough/README.md"]},
+    "vscode": {"extensions": ["golang.go", "ms-python.python"]}
+  }
+}

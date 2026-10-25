@@ -14,6 +14,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $p := deepCopy .Values.policy -}}
 {{- $_ := set $p "agents" .Values.agents -}}
 {{- $_ := set $p "delegates" .Values.delegates -}}
+{{- $_ := set $p "auditors" .Values.auditors -}}
 {{ toYaml $p }}
 {{- end -}}
 {{/* CEL: true only for agent identities. has() guards keep a missing field from erroring (an error would fail closed for everyone). */}}

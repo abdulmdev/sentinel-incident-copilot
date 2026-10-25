@@ -54,17 +54,51 @@ type Engine struct {
 	OnEvent   func(e Event, r *Request)
 	OnVoid    func(e Event, cause error)
 
-	policy atomic.Pointer[Policy]
+	policy atomic.Pointer[loadedPolicy]
+}
+
+type loadedPolicy struct {
+	*Policy
+	version, text string
+	recorded      atomic.Bool
 }
 
 func NewEngine(store Store, signer *Signer, prober Prober, policy *Policy) *Engine {
 	e := &Engine{Store: store, Signer: signer, Prober: prober, Now: time.Now}
-	e.policy.Store(policy)
+	e.SetPolicy(policy)
 	return e
 }
 
-func (e *Engine) Policy() *Policy     { return e.policy.Load() }
-func (e *Engine) SetPolicy(p *Policy) { e.policy.Store(p) }
+func (e *Engine) Policy() *Policy { return e.policy.Load().Policy }
+
+// PolicyVersion is the version of the policy in force (see Policy.Canonical).
+func (e *Engine) PolicyVersion() string { return e.policy.Load().version }
+
+// SetPolicy puts a policy in force. Call RecordPolicy afterwards so the version is kept.
+func (e *Engine) SetPolicy(p *Policy) {
+	version, text := p.Canonical()
+	e.policy.Store(&loadedPolicy{Policy: p, version: version, text: text})
+}
+
+// RecordPolicy keeps the policy in force, signed, unless this version was recorded before. Every
+// request carries the version it was evaluated under, so evidence can show the exact rules.
+func (e *Engine) RecordPolicy(ctx context.Context) error {
+	lp := e.policy.Load()
+	if lp.recorded.Load() {
+		return nil
+	}
+	rec := PolicyRecord{Version: lp.version, Text: lp.text, LoadedAt: e.Now().UTC().Format(time.RFC3339Nano), Kid: e.Signer.KeyID()}
+	sig, err := e.Signer.SignHash(rec.SigningHash())
+	if err != nil {
+		return err
+	}
+	rec.Sig = sig
+	if err := e.Store.RecordPolicy(ctx, rec); err != nil {
+		return fmt.Errorf("recording policy %.12s: %w", lp.version, err)
+	}
+	lp.recorded.Store(true)
+	return nil
+}
 
 // Evaluate decides what happens to a proposed action. For a Kubernetes change, "allow" means the
 // API request is admitted; for an API agent, it comes with a single-use capability.
@@ -240,6 +274,10 @@ func (e *Engine) recent(ctx context.Context, key string, phase Phase) (*Request,
 }
 
 func (e *Engine) create(ctx context.Context, p Proposal, ap ActionPolicy, phase Phase, reasons []string, checks []Check) (*Request, error) {
+	// No request may name a policy version that isn't kept (a no-op once recorded).
+	if err := e.RecordPolicy(ctx); err != nil {
+		return nil, err
+	}
 	now := e.Now().UTC()
 	id, err := e.nextID(ctx, p.Key())
 	if err != nil {
@@ -249,7 +287,7 @@ func (e *Engine) create(ctx context.Context, p Proposal, ap ActionPolicy, phase 
 		ID: id, Key: p.Key(), Source: p.Source, Agent: p.Agent, Action: p.Action, Target: p.Target,
 		Change: p.Change, Fingerprint: p.Fingerprint, Intent: p.Intent, Risk: ap.Risk, Autonomy: ap.Autonomy,
 		CreatedAt: now, Phase: phase, Reasons: reasons, Preconditions: checks,
-		ExpiresAt: now.Add(e.Policy().PendingTTL.Duration),
+		ExpiresAt: now.Add(e.Policy().PendingTTL.Duration), PolicyVersion: e.PolicyVersion(),
 	}
 	typ, actor, detail := EventRequested, p.Agent, ""
 	switch phase {
@@ -351,17 +389,24 @@ func (e *Engine) void(ctx context.Context, ev Event) {
 	})
 }
 
-// chain claims the next sequence number in the global audit chain and signs the event.
+// chain claims the next sequence number in the global audit chain, signs the event and signs
+// the new head as a checkpoint.
 func (e *Engine) chain(ctx context.Context, r *Request, typ, actor, detail string) (Event, error) {
 	digest := r.Digest()
 	var ev Event
 	_, err := e.Store.AdvanceHead(ctx, func(h Head) (Head, error) {
-		ev = Event{Seq: h.Seq + 1, Prev: h.Hash, Type: typ, At: e.Now().UTC().Format(time.RFC3339Nano), Actor: actor,
+		at := e.Now().UTC().Format(time.RFC3339Nano)
+		ev = Event{Seq: h.Seq + 1, Prev: h.Hash, Type: typ, At: at, Actor: actor,
 			Detail: detail, RequestID: r.ID, Digest: digest, Kid: e.Signer.KeyID()}
 		ev.Hash = ev.ComputeHash()
 		sig, err := e.Signer.SignHash(ev.Hash)
+		if err != nil {
+			return h, err
+		}
 		ev.Sig = sig
-		return Head{Seq: ev.Seq, Hash: ev.Hash, Voids: h.Voids}, err
+		next := Head{Seq: ev.Seq, Hash: ev.Hash, Voids: h.Voids, At: at, Kid: e.Signer.KeyID()}
+		next.Sig, err = e.Signer.SignHash(next.SigningHash())
+		return next, err
 	})
 	return ev, err
 }
@@ -617,15 +662,29 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// Verify checks the whole audit chain with the guard's own public key.
+// Verify checks the whole audit chain, and the recorded policy versions, with the guard's own
+// public key.
 func (e *Engine) Verify(ctx context.Context) (AuditReport, error) {
-	reqs, err := e.Store.List(ctx)
+	ev, err := e.Evidence(ctx, "")
 	if err != nil {
 		return AuditReport{}, err
+	}
+	return VerifyEvidence(ev, e.Signer.PublicKeys()).AuditReport, nil
+}
+
+// Evidence gathers the complete, self-verifying record (see Evidence).
+func (e *Engine) Evidence(ctx context.Context, generatedBy string) (*Evidence, error) {
+	reqs, err := e.Store.List(ctx)
+	if err != nil {
+		return nil, err
 	}
 	head, err := e.Store.Head(ctx)
 	if err != nil {
-		return AuditReport{}, err
+		return nil, err
 	}
-	return VerifyAudit(reqs, head, e.Signer.PublicKeys()), nil
+	pols, err := e.Store.Policies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return BuildEvidence(reqs, head, pols, e.Signer.JWKS(), generatedBy, e.Now()), nil
 }

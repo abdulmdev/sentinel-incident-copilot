@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	admissionv1 "k8s.io/api/admission/v1"
 	authnv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -353,5 +354,99 @@ func TestAPIHandlerHasNoWebhooks(t *testing.T) {
 	s.APIHandler().ServeHTTP(jwks, httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil))
 	if jwks.Code != 200 {
 		t.Fatal(jwks.Code)
+	}
+}
+
+func get(h http.Handler, path, token string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestEvidenceExportIsForAuditorsAndVerifies(t *testing.T) {
+	s, _ := newServer(t)
+	s.Agents = StaticTokens{"agent-token": "refund-bot", "auditor-token": "evidence-archiver"}
+	p := *s.Engine.Policy()
+	p.Auditors.Users = []string{"evidence-archiver"}
+	s.Engine.SetPolicy(&p)
+	h := s.Handler()
+	body := ProposeRequest{Action: "refund", Target: guard.Target{Name: "order-7"}, Change: map[string]string{"amount": "9.00 EUR"}}
+	rec := post(t, h, "/v1/actions", body, "agent-token")
+	var out guard.Outcome
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	post(t, h, "/v1/actions/"+out.Request.ID+"/deny", map[string]string{"approver": "alice", "note": "duplicate"}, "admin-token")
+
+	for _, token := range []string{"", "agent-token"} {
+		if rec := get(h, "/v1/audit/export", token); rec.Code != 401 {
+			t.Fatalf("export with %q: %d", token, rec.Code)
+		}
+	}
+	for _, token := range []string{"admin-token", "auditor-token"} {
+		rec := get(h, "/v1/audit/export", token)
+		if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Disposition"), "sentinel-guard-evidence-") {
+			t.Fatalf("export with %s: %d %s", token, rec.Code, rec.Body)
+		}
+		var ev guard.Evidence
+		if err := json.Unmarshal(rec.Body.Bytes(), &ev); err != nil {
+			t.Fatal(err)
+		}
+		rep := guard.VerifyEvidence(&ev, s.Engine.Signer.PublicKeys())
+		if !rep.OK || rep.Summary.Outcomes["denied"] != 1 || rep.Summary.Deciders["alice"] != 1 {
+			t.Fatalf("%+v", rep)
+		}
+	}
+	if rec := get(h, "/v1/audit/verify", "auditor-token"); !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("an auditor may verify too: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestGuardianMetrics(t *testing.T) {
+	s, mem := newServer(t)
+	h := s.Handler()
+	propose := func(amount string) string {
+		rec := post(t, h, "/v1/actions", ProposeRequest{Action: "refund", Target: guard.Target{Name: "order-1"},
+			Change: map[string]string{"amount": amount}}, "agent-token")
+		var out guard.Outcome
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out.Request.ID
+	}
+	propose("1.00")
+	denied := propose("2.00")
+	post(t, h, "/v1/actions/"+denied+"/deny", map[string]string{"approver": "alice"}, "admin-token")
+	clk := time.Now().Add(20 * time.Minute)
+	s.Engine.Now = func() time.Time { return clk }
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // one pass, then stop
+	s.Monitor(ctx, time.Hour, time.Hour)
+
+	m := s.Metrics
+	if v := testutil.ToFloat64(m.Outcomes.WithLabelValues("refund-bot", "refund", guard.OutcomeProposed)); v != 2 {
+		t.Fatalf("proposed = %v", v)
+	}
+	if v := testutil.ToFloat64(m.Outcomes.WithLabelValues("refund-bot", "refund", guard.OutcomeDenied)); v != 1 {
+		t.Fatalf("denied = %v", v)
+	}
+	if v := testutil.ToFloat64(m.Open.WithLabelValues("Pending")); v != 1 {
+		t.Fatalf("open pending = %v", v)
+	}
+	if v := testutil.ToFloat64(m.OldestPending); v < 20*60 || v > 21*60 {
+		t.Fatalf("oldest pending = %v s", v)
+	}
+	if testutil.ToFloat64(m.ChainOK) != 1 || testutil.ToFloat64(m.HeadSeq) != 3 || testutil.ToFloat64(m.Verified) == 0 {
+		t.Fatalf("chain ok %v, head %v", testutil.ToFloat64(m.ChainOK), testutil.ToFloat64(m.HeadSeq))
+	}
+	if testutil.ToFloat64(m.PolicyInfo.WithLabelValues(s.Engine.PolicyVersion()[:12])) != 1 {
+		t.Fatal("policy info")
+	}
+
+	mem.Delete(denied) // tampering: a record disappears
+	s.Monitor(ctx, time.Hour, time.Hour)
+	if testutil.ToFloat64(m.ChainOK) != 0 {
+		t.Fatal("self-verification must notice a deleted record")
 	}
 }

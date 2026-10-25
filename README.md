@@ -15,6 +15,8 @@
 ![Terraform](https://img.shields.io/badge/Terraform-AWS-844FBA?logo=terraform&logoColor=white)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/abdulmdev/sentinel-incident-copilot?quickstart=1)
+
 [Website](https://abdulmdev.github.io/sentinel-incident-copilot/) · [Write-up: what a local 8B model taught us about letting AI touch production](https://abdulmdev.github.io/sentinel-incident-copilot/blog/ai-agent-production-guardrails.html) · [User guide](docs/USER-GUIDE.md) · [Engineering handbook](docs/handbook/README.md) ([PDF](docs/Sentinel-Handbook.pdf)) · [System design](docs/DESIGN.md) · [ADRs](docs/adr/) · [Benchmark report](evals/rca/REPORT.md)
 
 <img src="docs/media/closed-loop.gif" alt="A bad deploy breaks checkout; Prometheus fires; Sentinel opens the incident by itself, investigates with tools, cites evidence; a human approves; the fix runs once and recovery is verified: mitigated in 14 s" width="900">
@@ -38,10 +40,10 @@ $ kubectl sentinel approve ar-c8f4166c-1                       # on-call enginee
 Approved ar-c8f4166c-1: scale of shop/deployment/checkout (replicas: 2 → 3), by alice.
 ```
 
-- **Bound to the exact change.** Approving "scale to 3" doesn't admit "scale to 0", a second restart, or the same change after someone reverted it. This is proven on a real API server in CI, including the API server's own write retries (25 end-to-end checks).
-- **Tamper-evident.** Every request, decision and execution is a signed link in a hash chain; `kubectl sentinel audit verify` checks it yourself and also detects deleted records.
+- **Bound to the exact change.** Approving "scale to 3" doesn't admit "scale to 0", a second restart, or the same change after someone reverted it. This is proven on a real API server in CI, including the API server's own write retries (31 end-to-end checks).
+- **Tamper-evident, and provable to others.** Every request, decision and execution is a signed link in a hash chain; `kubectl sentinel audit verify` checks it yourself and also detects deleted records. `kubectl sentinel audit export` gives an auditor one file to verify offline ([below](#-governance-and-compliance)).
 - **Small.** One Go binary, an 11.5 MB image, no database. Its state lives in the Kubernetes API, and 3 replicas share it.
-- **Measured** (p99 through the API server, 3 replicas): a human's change 4.9 ms, an agent's pending change 4.6 ms, an approved change admitted once 42.9 ms.
+- **Measured** (p99 through the API server, 3 replicas, a laptop): a human's change 8.8 ms, an agent's pending change 6.0 ms, an approved change admitted once 40.8 ms.
 
 - **Any agent, not just kubectl:**
   - **Python** and **TypeScript** SDKs: `guard.require(...)`, then `guard.spend(...)`, or a decorator;
@@ -51,6 +53,8 @@ Approved ar-c8f4166c-1: scale of shop/deployment/checkout (replicas: 2 → 3), b
   See [the SDKs](sdk/python/README.md) and the [examples](examples/).
 
 Also `kubectl apply -f install.yaml`, `docker run ghcr.io/abdulmdev/sentinel-guard` (single process, HTTP API for agents outside Kubernetes), and `kubectl krew install sentinel/sentinel`. **[Sentinel Guard docs →](docs/guard/README.md)**
+
+**Try it in a minute:** open the repository in GitHub Codespaces (button above) and run `scripts/guard-demo.sh`, or run it locally (Go and Python, no Docker). A refund agent asks; a person approves; it runs exactly once; a replay is refused; the record is exported, verified offline, and an edited copy is caught. [What it shows →](examples/walkthrough/README.md)
 
 ## 📊 SafeActionBench: how often do agents' actions cause harm?
 
@@ -66,6 +70,16 @@ An open, deterministic benchmark of **224 replayed production incidents**: red h
 | Sentinel's rules | 0.0% | 0.0% | 82.6% |
 
 The incidents are synthetic, so the guarded numbers are an upper bound; the benchmark says so on its own page. **[Leaderboard →](https://abdulmdev.github.io/sentinel-incident-copilot/bench/)** · **[Take it →](bench/README.md)**
+
+## 🧾 Governance and compliance
+
+What agents did, who allowed it and under which rules, in a form anyone can check:
+- **Evidence export.** `kubectl sentinel audit export` writes one file: every request, its signed events, every policy version and the signed chain head. `kubectl sentinel audit verify --bundle` checks it offline; `--previous` proves nothing was removed since the last archived export.
+- **Each decision names its rules.** Requests carry the SHA-256 of the policy they were decided under; the guard keeps every version, signed.
+- **Guardian monitoring.**
+  - Every replica re-verifies the whole chain every 5 minutes.
+  - Per-agent metrics and tested alert rules flag a broken or rewound chain, an approval backlog, and drift in an agent's behaviour: bursts of blocked attempts, rising denials, people overriding it.
+- **Mapped, not claimed:** where this produces evidence for the [EU AI Act](docs/compliance/eu-ai-act.md) (Articles 12, 14, 19, 26, 72; for Annex III high-risk systems they apply from 2 December 2027) and the [NIST AI RMF](docs/compliance/nist-ai-rmf.md), and what stays yours. [docs/compliance →](docs/compliance/README.md)
 
 ## ✈️ Why Sentinel exists: the cockpit idea
 
@@ -109,7 +123,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 | **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **290** automated tests (incl. 34 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 25 Guard checks on a real API server; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **305** automated tests (incl. 49 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 31 Guard checks on a real API server, promtool-tested alert rules and an asserted walkthrough; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 
@@ -210,7 +224,7 @@ cd guard && go test -race ./...
 LOAD=1 scripts/guard-e2e.sh
 ```
 
-CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers on real pgvector/Redis), the benchmark gate (main + held-out), docs-sync checks, Helm/kubeconform/Terraform validation, a least-privilege secrets check, and a **real kind cluster end to end** (incident → approve → `RESOLVED`, NetworkPolicy denials), and the **Sentinel Guard end to end** (25 checks, a load run, the guard taken down), then publishes multi-arch images.
+CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers on real pgvector/Redis), the benchmark gate (main + held-out), docs-sync checks, Helm/kubeconform/Terraform validation, a least-privilege secrets check, and a **real kind cluster end to end** (incident → approve → `RESOLVED`, NetworkPolicy denials), and the **Sentinel Guard end to end** (31 checks, a load run, the guard taken down), then publishes multi-arch images.
 
 ## Where to look in the code (5-minute tour)
 
@@ -247,6 +261,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 | 11 The copilot on the guard | One safety core: the agent proposes to the guard, console approvals are recorded there by the gateway, the adapter redeems the guard's capability; live: alert → **verified fix in 24.4 s** |
 | 12 SDKs and the MCP proxy | Python and TypeScript SDKs, a LangChain/LangGraph wrapper and a zero-code MCP proxy, tested against the real guard |
 | 13 SafeActionBench | The incident benchmark as an open benchmark for any agent and any guard; an independent guard alone took a small model from 33.9% to 0% harmful |
+| 14 Governance and compliance | A signed evidence export anyone can verify offline, policy versions, signed checkpoints, guardian alerts on agent drift (tested with promtool), the EU AI Act / NIST AI RMF mapping, and a one-click Codespaces demo |
 
 <details>
 <summary><b>All design decisions and their reasons</b></summary>
@@ -278,7 +293,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 </details>
 
 ## Roadmap
-Claude benchmark column (needs an API key) · KMS-backed signing and mTLS · async approval with streamed progress · dependency-aware alert correlation · incidents recorded from real postmortems. Details: [limitations and roadmap](docs/handbook/16-limitations-and-roadmap.md).
+Claude benchmark column (needs an API key) · compaction after archived evidence export · *N*-of-*M* approvals · KMS-backed signing and mTLS · async approval with streamed progress · dependency-aware alert correlation · incidents recorded from real postmortems. Details: [limitations and roadmap](docs/handbook/16-limitations-and-roadmap.md).
 
 ## Contributing and license
 Contributions are welcome: see [CONTRIBUTING](CONTRIBUTING.md) (how to run, verify and keep the docs in sync), the [code of conduct](CODE_OF_CONDUCT.md) and the [security policy](SECURITY.md). Licensed under the [Apache License 2.0](LICENSE).

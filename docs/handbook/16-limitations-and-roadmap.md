@@ -27,7 +27,11 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 | Deployment | Terraform validated, never applied; ESO/ALB/OTel Collector assumed | Unknown apply-time issues | Apply in a sandbox account; add the add-ons via Helm/Terraform |
 | Data | No retention or deletion policy for incidents, the cache, checkpoints | Unbounded growth; data-protection obligations | TTL jobs; tenant deletion workflow |
 | Product | Alertmanager only (no PagerDuty/Opsgenie) | Teams on other tools open incidents by hand | Further receivers on the same `AlertService` |
-| Guard | `ActionRequest` objects are never deleted (they are the audit record) | Unbounded growth of objects in `sentinel-system`; the watch cache holds them all | Retention with a signed export (the chain segment, its head and the public key), then compaction |
+| Guard | `ActionRequest` objects are never deleted (they are the audit record), about 2 KB each; the evidence export exists (Phase 14) but nothing compacts | Unbounded growth of objects in `sentinel-system` and etcd; the watch cache holds them all | Compaction after a verified, archived export: keep the signed head of the archived segment as the new chain's anchor |
+| Guard | A restored older signed head, with the newest events deleted, verifies on its own (Phase 14) | Someone with write access to the guard's objects and a saved older head could hide recent actions until compared with an archive | Already caught by `--previous` against an archived bundle and by `SentinelGuardAuditHeadWentBack`; stronger: an external timestamping or transparency log for each head |
+| Guard | One approver per request; no *N*-of-*M* | High-risk actions can't require two people | Per-action `approvals: N` in the policy, distinct deciders enforced by the webhook |
+| Guard | Guardian alert thresholds are starting points, unit-tested on synthetic series, not tuned on real traffic; no Grafana dashboard for the guard yet | Noisy or late alerts on real agents | Tune on real traffic; ship a dashboard with the chart |
+| Compliance | `docs/compliance` maps features to the EU AI Act and NIST AI RMF; it is not legal advice or a conformity assessment | Readers may over-read a mapping as compliance | Review by counsel; follow the revised AI RMF and Commission guidance as they appear |
 | Guard | The chain head is one ConfigMap: every event is serialized through it, and `voids` grows with lost races | Throughput suits human approvals, not a high-volume event log; voids accumulate slowly | Segment the chain per period with signed checkpoints; compact voids into the export |
 | Guard | Signing key and TLS cert in Kubernetes Secrets; rotating the key drops the old public key | Events signed with an old key can't be verified after rotation | Keep a key history in the JWKS ConfigMap; optional KMS signing |
 | Guard | Only the configured operations are guarded (workload updates and deletes, deletes of common objects); `exec`, `port-forward`, CRDs from other operators and RBAC changes are not, by default | An agent with broad RBAC can still act through unguarded paths | Grow the default rules; pair with least-privilege RBAC for agent ServiceAccounts; Kyverno/Gatekeeper packs |
@@ -47,7 +51,7 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 
 *Figure 16.1: Roadmap items by impact and effort*
 
-0. **Sentinel Guard, next** (v2): frontier-model entries on SafeActionBench; verify the reviewer's OIDC token at the guard; publish the SDKs (PyPI, npm); native Claude Agent SDK and OpenAI Agents SDK adapters; a Java SDK; retention with signed export; Slack approvals; Kyverno/Gatekeeper packs; the SafeActionBench benchmark.
+0. **Sentinel Guard, next** (v2): frontier-model entries on SafeActionBench; verify the reviewer's OIDC token at the guard; publish the SDKs (PyPI, npm); native Claude Agent SDK and OpenAI Agents SDK adapters; a Java SDK; compaction after archived export; *N*-of-*M* approvals; external anchoring of chain heads; a guard dashboard; Slack approvals; Kyverno/Gatekeeper packs.
 1. **Claude column** (needs an API key); improve the local model's accuracy on red-herring and injection tiers (currently 33–38%: safe, but escalated).
 2. **Real-world benchmark data:** record chaos-lab incidents; import anonymized postmortems.
 3. **Identity, next:** KMS-backed signing; mTLS/SPIFFE between pods; egress NetworkPolicies.
@@ -60,3 +64,4 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 *Done in Phase 11:* the incident copilot runs on Sentinel Guard (one approval and capability path).
 *Done in Phase 12:* SDKs (Python, TypeScript) and an MCP proxy for agents outside Kubernetes.
 *Done in Phase 13:* SafeActionBench, the open benchmark with an MCP harness and a reproducible leaderboard.
+*Done in Phase 14:* the signed evidence export with offline verification, policy versions, signed checkpoints, guardian monitoring and alerts, the EU AI Act / NIST AI RMF mapping, and a one-click Codespaces demo.

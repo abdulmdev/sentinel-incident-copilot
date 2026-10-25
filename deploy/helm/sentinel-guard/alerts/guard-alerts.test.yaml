@@ -1,0 +1,137 @@
+# promtool test rules guard-alerts.test.yaml: each alert fires on the behaviour it is for, and
+# stays quiet on normal behaviour.
+rule_files: [guard-alerts.yaml]
+evaluation_interval: 1m
+
+tests:
+  - name: integrity
+    interval: 1m
+    input_series:
+      - series: sentinel_guard_audit_chain_ok{pod="guard-0"}
+        values: 1 1 0x10
+      - series: sentinel_guard_audit_chain_ok{pod="guard-1"}
+        values: 1x12
+      - series: sentinel_guard_audit_head_seq{pod="guard-0"}
+        values: 10 11 12 5x10
+      - series: sentinel_guard_audit_last_verified_timestamp_seconds{pod="guard-0"}
+        values: 0+60x10 600x50
+    alert_rule_test:
+      - {eval_time: 1m, alertname: SentinelGuardAuditChainBroken, exp_alerts: []}
+      - eval_time: 5m
+        alertname: SentinelGuardAuditChainBroken
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: The guard's audit chain failed self-verification
+              description: "A record was edited, deleted or forged since it was written. Run `kubectl sentinel audit verify` for the details, and keep the evidence: `kubectl sentinel audit export > evidence.json`."
+      - {eval_time: 5m, alertname: SentinelGuardAuditHeadWentBack, exp_alerts: []}
+      - eval_time: 9m
+        alertname: SentinelGuardAuditHeadWentBack
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: The audit chain head moved backwards
+              description: The chain only grows, so the newest events were cut and an older signed head restored. Compare with your latest archived evidence export. (In memory mode a restart also resets the chain.)
+      - {eval_time: 40m, alertname: SentinelGuardAuditNotVerified, exp_alerts: []}
+      - eval_time: 47m
+        alertname: SentinelGuardAuditNotVerified
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: No guard replica has verified the audit chain for over 30 minutes
+              description: Self-verification runs every 5 minutes by default (SENTINEL_GUARD_VERIFY_INTERVAL). Check the guard's logs.
+
+  - name: approval backlog
+    interval: 1m
+    input_series:
+      - series: sentinel_guard_oldest_pending_seconds{pod="guard-0"}
+        values: 0+600x12
+    alert_rule_test:
+      - {eval_time: 6m, alertname: SentinelGuardApprovalBacklog, exp_alerts: []}
+      - eval_time: 10m
+        alertname: SentinelGuardApprovalBacklog
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: An agent has waited over 30 minutes for a human decision
+              description: Requests expire undecided after pendingTTL. Run `kubectl sentinel requests` and approve or deny, or check that approvers are being notified.
+
+  - name: blocked burst (a looping or manipulated agent)
+    interval: 1m
+    input_series:
+      - series: sentinel_guard_agent_outcomes_total{agent="fixer", action="delete", outcome="blocked"}
+        values: 0x10 1+1x10
+      - series: sentinel_guard_agent_outcomes_total{agent="steady", action="scale", outcome="blocked"}
+        values: 0x10 1x10
+    alert_rule_test:
+      - {eval_time: 10m, alertname: SentinelGuardAgentBlockedBurst, exp_alerts: []}
+      - eval_time: 20m
+        alertname: SentinelGuardAgentBlockedBurst
+        exp_alerts:
+          - exp_labels: {severity: warning, agent: fixer}
+            exp_annotations:
+              summary: fixer hit policy limits 10 times in 10 minutes
+              description: An agent repeatedly trying what policy forbids is often stuck in a loop, or following instructions it shouldn't (prompt injection). Its blocked requests are in `kubectl sentinel requests --all`.
+
+  - name: rejection drift against a 7-day baseline
+    interval: 10m
+    input_series:
+      # fixer: one proposal every 10 minutes for 7 days, never blocked; then one blocked attempt per proposal.
+      - series: sentinel_guard_agent_outcomes_total{agent="fixer", action="scale", outcome="proposed"}
+        values: 0+1x1100
+      - series: sentinel_guard_agent_outcomes_total{agent="fixer", action="scale", outcome="blocked"}
+        values: 0x1008 1+1x91
+      # steady: always about one block in six attempts: no drift.
+      - series: sentinel_guard_agent_outcomes_total{agent="steady", action="scale", outcome="proposed"}
+        values: 0+1x1100
+      - series: sentinel_guard_agent_outcomes_total{agent="steady", action="scale", outcome="blocked"}
+        values: 0+0.2x1100
+    alert_rule_test:
+      - {eval_time: 167h, alertname: SentinelGuardAgentRejectionDrift, exp_alerts: []}
+      - eval_time: 173h20m
+        alertname: SentinelGuardAgentRejectionDrift
+        exp_alerts:
+          - exp_labels: {severity: warning, agent: fixer}
+            exp_annotations:
+              summary: 'fixer: 50% of its actions blocked or denied in the last hour'
+              description: More than twice its 7-day rate. Its proposals no longer match what policy and people accept.
+
+  - name: human overrides
+    interval: 1h
+    input_series:
+      - series: sentinel_guard_agent_outcomes_total{agent="fixer", action="rollout", outcome="denied"}
+        values: 0+1x30
+      - series: sentinel_guard_agent_outcomes_total{agent="fixer", action="rollout", outcome="approved"}
+        values: 0x30
+      - series: sentinel_guard_agent_outcomes_total{agent="steady", action="scale", outcome="approved"}
+        values: 0+1x30
+      - series: sentinel_guard_agent_outcomes_total{agent="steady", action="scale", outcome="denied"}
+        values: 0+0.2x30
+    alert_rule_test:
+      - {eval_time: 2h, alertname: SentinelGuardHumanOverrides, exp_alerts: []}
+      - eval_time: 26h
+        alertname: SentinelGuardHumanOverrides
+        exp_alerts:
+          - exp_labels: {severity: warning, agent: fixer}
+            exp_annotations:
+              summary: Reviewers denied 100% of what fixer asked for in 24 hours
+              description: People are overriding this agent more often than they accept it. Review its recent proposals and denial notes.
+
+  - name: escalation drift (preconditions stop being observed)
+    interval: 10m
+    input_series:
+      - series: sentinel_guard_agent_outcomes_total{agent="fixer", action="restart", outcome="auto_approved"}
+        values: 0+1x1008 1008x92
+      - series: sentinel_guard_agent_outcomes_total{agent="fixer", action="restart", outcome="proposed"}
+        values: 0x1008 1+1x91
+      - series: sentinel_guard_agent_outcomes_total{agent="steady", action="restart", outcome="auto_approved"}
+        values: 0+1x1100
+    alert_rule_test:
+      - {eval_time: 167h, alertname: SentinelGuardAgentEscalationDrift, exp_alerts: []}
+      - eval_time: 173h20m
+        alertname: SentinelGuardAgentEscalationDrift
+        exp_alerts:
+          - exp_labels: {severity: info, agent: fixer}
+            exp_annotations:
+              summary: fixer needs a human for 100% of its actions, over twice its usual rate
+              description: "Actions it normally takes on policy (autonomy auto) now wait for people: their preconditions are not being observed. Check the telemetry the preconditions query, or what the agent is attempting."

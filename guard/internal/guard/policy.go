@@ -24,6 +24,7 @@ const (
 type Policy struct {
 	Agents              Agents                  `json:"agents"`
 	Delegates           Agents                  `json:"delegates"`
+	Auditors            Agents                  `json:"auditors"`
 	Defaults            ActionPolicy            `json:"defaults"`
 	Actions             map[string]ActionPolicy `json:"actions"`
 	ProtectedNamespaces []string                `json:"protectedNamespaces"`
@@ -36,7 +37,8 @@ type Policy struct {
 
 // Agents identifies which callers are AI agents. Everyone else (humans, CI, controllers) is
 // never stopped by the guard. The same shape lists Delegates: services trusted to record a
-// decision on behalf of a person they authenticated (Sentinel's gateway, for its console users).
+// decision on behalf of a person they authenticated (Sentinel's gateway, for its console users),
+// and Auditors: identities that may read the audit trail and export evidence.
 type Agents struct {
 	Users  []string `json:"users"`
 	Groups []string `json:"groups"`
@@ -148,6 +150,21 @@ func (p *Policy) IsAgent(user string, groups []string) bool { return p.Agents.ma
 
 func (p *Policy) IsDelegate(user string, groups []string) bool {
 	return p.Delegates.matches(user, groups)
+}
+
+// IsAuditor reports whether a caller may read the audit trail and export evidence over HTTP.
+func (p *Policy) IsAuditor(user string, groups []string) bool {
+	return p.Auditors.matches(user, groups)
+}
+
+// Canonical is the effective policy as the guard enforces it (after defaults and anything the
+// guard adds, such as its own protected namespace), and its version: the SHA-256 of that text.
+func (p *Policy) Canonical() (version, text string) {
+	b, err := yaml.Marshal(p)
+	if err != nil { // a Policy always marshals; keep the version well defined regardless
+		b = []byte(err.Error())
+	}
+	return sha(string(b)), string(b)
 }
 
 func (a Agents) matches(user string, groups []string) bool {

@@ -5,6 +5,10 @@
 //	kubectl sentinel approve <id> [-m]   approve exactly that change, once
 //	kubectl sentinel deny <id> [-m]      deny it
 //	kubectl sentinel audit verify        verify the tamper-evident audit chain yourself
+//	kubectl sentinel audit export        write the evidence bundle (every request, signed) to stdout
+//	kubectl sentinel audit verify --bundle evidence.json [--jwks keys.json] [--previous older.json]
+//	                                     verify a bundle offline, without cluster access, and that it
+//	                                     extends an earlier, archived one
 //
 // Approvals go through the Kubernetes API with your own credentials: RBAC decides who may approve,
 // and the guard records the identity the API server authenticated.
@@ -12,6 +16,7 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,17 +47,22 @@ Usage:
   kubectl sentinel approve <id> [-m "note"]
   kubectl sentinel deny <id> [-m "note"]
   kubectl sentinel audit verify
+  kubectl sentinel audit export > evidence.json
+  kubectl sentinel audit verify --bundle evidence.json [--jwks keys.json] [--previous older.json]   (offline)
   kubectl sentinel version
 
 Flags:
   --guard-namespace   where Sentinel Guard runs (default sentinel-system, or $SENTINEL_GUARD_NAMESPACE)
   --context, --kubeconfig   as for kubectl
+  --bundle            an evidence file to verify offline
+  --jwks              public keys to trust (default: the bundle's own; compare the key ID you are shown)
+  --previous          an earlier, archived bundle that this one must extend (nothing removed or changed)
 `
 
 type opts struct {
-	kubeconfig, context, namespace, note, output string
-	all                                          bool
-	args                                         []string
+	kubeconfig, context, namespace, note, output, bundle, jwks, previous string
+	all                                                                  bool
+	args                                                                 []string
 }
 
 func parse(argv []string) (opts, error) {
@@ -64,7 +74,7 @@ func parse(argv []string) (opts, error) {
 		a := argv[i]
 		name, value, hasValue := strings.Cut(a, "=")
 		takes := map[string]*string{"--kubeconfig": &o.kubeconfig, "--context": &o.context, "--guard-namespace": &o.namespace,
-			"-m": &o.note, "--note": &o.note, "-o": &o.output, "--output": &o.output}
+			"-m": &o.note, "--note": &o.note, "-o": &o.output, "--output": &o.output, "--bundle": &o.bundle, "--jwks": &o.jwks, "--previous": &o.previous}
 		if dst, ok := takes[name]; ok {
 			if !hasValue {
 				if i+1 >= len(argv) {
@@ -139,6 +149,12 @@ func run(ctx context.Context, o opts) error {
 		fmt.Println("kubectl-sentinel", version)
 		return nil
 	}
+	if cmd == "audit" && o.bundle != "" { // offline: no cluster needed
+		if len(rest) != 1 || rest[0] != "verify" {
+			return errors.New("usage: kubectl sentinel audit verify --bundle evidence.json [--jwks keys.json] [--previous older.json]")
+		}
+		return verifyBundle(o.bundle, o.jwks, o.previous)
+	}
 	c, err := connect(o)
 	if err != nil {
 		return err
@@ -157,10 +173,13 @@ func run(ctx context.Context, o opts) error {
 		}
 		return c.decide(ctx, rest[0], cmd, o.note)
 	case "audit":
-		if len(rest) != 1 || rest[0] != "verify" {
-			return errors.New("usage: kubectl sentinel audit verify")
+		switch {
+		case len(rest) == 1 && rest[0] == "verify":
+			return c.verify(ctx)
+		case len(rest) == 1 && rest[0] == "export":
+			return c.export(ctx)
 		}
-		return c.verify(ctx)
+		return errors.New("usage: kubectl sentinel audit verify | export")
 	}
 	return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
 }
@@ -316,24 +335,112 @@ func (c *client) decide(ctx context.Context, id, verb, note string) error {
 	}
 }
 
-func (c *client) verify(ctx context.Context) error {
+// evidence reads the whole record through the API with your own credentials (the viewer or
+// approver role suffices). Nothing in it needs trusting this tool: every part is signed by the guard.
+func (c *client) evidence(ctx context.Context) (*guard.Evidence, error) {
 	reqs, err := c.kube.List(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	head, err := c.kube.Head(ctx)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	pols, err := c.kube.Policies(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading policy versions: %w", err)
 	}
 	cm, err := c.core.ConfigMaps(c.ns).Get(ctx, kube.JWKSConfigMap, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("reading the guard's public keys: %w", err)
+		return nil, fmt.Errorf("reading the guard's public keys: %w", err)
 	}
-	keys, err := guard.ParseJWKS([]byte(cm.Data["jwks.json"]))
+	var jwks map[string]any
+	if err := json.Unmarshal([]byte(cm.Data["jwks.json"]), &jwks); err != nil {
+		return nil, fmt.Errorf("the guard's public keys: %w", err)
+	}
+	return guard.BuildEvidence(reqs, head, pols, jwks, "kubectl-sentinel "+version, time.Now()), nil
+}
+
+func (c *client) verify(ctx context.Context) error {
+	ev, err := c.evidence(ctx)
 	if err != nil {
 		return err
 	}
-	rep := guard.VerifyAudit(reqs, head, keys)
+	b, _ := json.Marshal(ev.JWKS)
+	keys, err := guard.ParseJWKS(b)
+	if err != nil {
+		return err
+	}
+	return report(guard.VerifyEvidence(ev, keys), false)
+}
+
+func (c *client) export(ctx context.Context) error {
+	ev, err := c.evidence(ctx)
+	if err != nil {
+		return err
+	}
+	if rep := guard.VerifyEvidence(ev, nil); !rep.OK {
+		fmt.Fprintln(os.Stderr, "warning: this record does NOT verify; exporting it as found:")
+		for _, p := range rep.Problems {
+			fmt.Fprintln(os.Stderr, "  -", p)
+		}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(ev)
+}
+
+func readBundle(path string) (*guard.Evidence, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var ev guard.Evidence
+	if err := json.Unmarshal(b, &ev); err != nil {
+		return nil, fmt.Errorf("%s is not an evidence bundle: %w", path, err)
+	}
+	return &ev, nil
+}
+
+func verifyBundle(path, jwksPath, previous string) error {
+	ev, err := readBundle(path)
+	if err != nil {
+		return err
+	}
+	var keys map[string]*ecdsa.PublicKey
+	if jwksPath != "" {
+		kb, err := os.ReadFile(jwksPath)
+		if err != nil {
+			return err
+		}
+		if keys, err = guard.ParseJWKS(kb); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("Evidence %s: generated %s by %s.\n", path, ev.GeneratedAt, ev.GeneratedBy)
+	rep := guard.VerifyEvidence(ev, keys)
+	if previous != "" {
+		older, err := readBundle(previous)
+		if err != nil {
+			return err
+		}
+		if p := guard.Continues(older, ev); len(p) > 0 {
+			rep.Problems, rep.OK = append(rep.Problems, p...), false
+		} else {
+			fmt.Printf("It extends %s (head #%d → #%d): nothing recorded there was removed or changed.\n", previous, older.Head.Seq, ev.Head.Seq)
+		}
+	}
+	return report(rep, jwksPath == "")
+}
+
+func seconds(s float64) string {
+	if s < 1 {
+		return "under a second"
+	}
+	return time.Duration(s * float64(time.Second)).Round(time.Second).String()
+}
+
+func report(rep guard.EvidenceReport, keysFromBundle bool) error {
 	if rep.OK {
 		voided := ""
 		if rep.Voided > 0 {
@@ -341,12 +448,42 @@ func (c *client) verify(ctx context.Context) error {
 		}
 		fmt.Printf("Audit chain OK: %d events across %d requests, head #%d%s, every signature valid.\n",
 			rep.Events, rep.Requests, rep.HeadSeq, voided)
-		return nil
+		fmt.Printf("Policy versions kept: %d; no request names a policy missing from them.\n", rep.Policies)
+	} else {
+		fmt.Printf("Audit chain FAILED (%d events, %d requests, head #%d):\n", rep.Events, rep.Requests, rep.HeadSeq)
+		for _, p := range rep.Problems {
+			fmt.Println("  -", p)
+		}
 	}
-	fmt.Printf("Audit chain FAILED (%d events, %d requests, head #%d):\n", rep.Events, rep.Requests, rep.HeadSeq)
-	for _, p := range rep.Problems {
-		fmt.Println("  -", p)
+	for _, w := range rep.Warnings {
+		fmt.Println("Note:", w)
 	}
-	os.Exit(2)
+	if keysFromBundle {
+		fmt.Printf("Checked against the key(s) in the bundle itself: %s. Compare with the guard's key ID you recorded "+
+			"(kubectl -n <guard namespace> get configmap sentinel-guard-jwks), or pass --jwks.\n", strings.Join(rep.Keys, ", "))
+	}
+	s := rep.Summary
+	if s.Requests > 0 {
+		fmt.Printf("\nOversight, %s to %s:\n", s.From, s.To)
+		for _, o := range []string{guard.OutcomeProposed, guard.OutcomeBlocked, guard.OutcomeAutoApproved, guard.OutcomeApproved,
+			guard.OutcomeDenied, guard.OutcomeExecuted, guard.OutcomeExpired} {
+			fmt.Printf("  %-14s %d\n", strings.ReplaceAll(o, "_", "-"), s.Outcomes[o])
+		}
+		fmt.Printf("  expired with nobody deciding: %d\n", s.ExpiredUndecided)
+		if s.DecisionSecondsMax > 0 {
+			fmt.Printf("  time to a human decision: median %s, longest %s\n", seconds(s.DecisionSecondsMedian), seconds(s.DecisionSecondsMax))
+		}
+		deciders := make([]string, 0, len(s.Deciders))
+		for who := range s.Deciders {
+			deciders = append(deciders, who)
+		}
+		sort.Strings(deciders)
+		for _, who := range deciders {
+			fmt.Printf("  decided by %s: %d\n", who, s.Deciders[who])
+		}
+	}
+	if !rep.OK {
+		os.Exit(2)
+	}
 	return nil
 }

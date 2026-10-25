@@ -73,6 +73,8 @@ jobs:
       - name: TypeScript SDK
         working-directory: sdk/typescript
         run: npm ci && npm run build && npm test
+      - name: The walkthrough demo (what Codespaces runs; every step asserts its result)
+        run: scripts/guard-demo.sh
 
   python:
     strategy:
@@ -166,6 +168,13 @@ jobs:
         run: |
           helm lint deploy/helm/sentinel-guard
           helm template t deploy/helm/sentinel-guard -n sentinel-system --include-crds | ./kubeconform -strict -summary -skip CustomResourceDefinition
+      - name: Alert rules (promtool; the guardian rules are unit-tested)
+        run: |
+          curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \
+            | tar xz --strip-components=1 prometheus-3.5.0.linux-amd64/promtool
+          ./promtool check rules deploy/helm/sentinel-guard/alerts/guard-alerts.yaml deploy/prometheus/alerts.yml
+          ./promtool test rules deploy/helm/sentinel-guard/alerts/guard-alerts.test.yaml
+          helm template t deploy/helm/sentinel-guard --set prometheusRule.enabled=true | grep -q "kind: PrometheusRule"
       - name: Least privilege - who may hold which secret (signing keys only in the gateway)
         run: |
           H=deploy/helm/sentinel

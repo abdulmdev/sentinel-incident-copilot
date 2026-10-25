@@ -29,3 +29,16 @@ spec:
   endpoints:
     - port: metrics
 {{- end }}
+{{- if .Values.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sentinel-guard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guard.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}{{ toYaml . | nindent 4 }}{{ end }}
+spec:
+  {{- .Files.Get "alerts/guard-alerts.yaml" | nindent 2 }}
+{{- end }}

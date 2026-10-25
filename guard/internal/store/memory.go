@@ -15,9 +15,10 @@ import (
 
 // Memory is a process-local store. State is lost on restart: use it for one replica only.
 type Memory struct {
-	mu   sync.Mutex
-	reqs map[string]*guard.Request
-	head guard.Head
+	mu       sync.Mutex
+	reqs     map[string]*guard.Request
+	head     guard.Head
+	policies []guard.PolicyRecord
 }
 
 func NewMemory() *Memory { return &Memory{reqs: map[string]*guard.Request{}} }
@@ -102,6 +103,24 @@ func (m *Memory) AdvanceHead(_ context.Context, fn func(guard.Head) (guard.Head,
 	}
 	m.head = h
 	return h, nil
+}
+
+func (m *Memory) RecordPolicy(_ context.Context, p guard.PolicyRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, have := range m.policies {
+		if have.Version == p.Version {
+			return nil
+		}
+	}
+	m.policies = append(m.policies, p)
+	return nil
+}
+
+func (m *Memory) Policies(_ context.Context) ([]guard.PolicyRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]guard.PolicyRecord(nil), m.policies...), nil
 }
 
 // Delete exists for tests that prove deletions are detected.

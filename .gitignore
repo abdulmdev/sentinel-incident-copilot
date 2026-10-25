@@ -34,3 +34,6 @@ launch-drafts.md
 
 # Helm dependency builds
 deploy/helm/*/charts/
+
+# scripts/guard-demo.sh
+.demo/

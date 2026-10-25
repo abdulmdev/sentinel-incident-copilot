@@ -11,10 +11,10 @@ Sentinel Guard is Sentinel's safe-action core (approval → single-use capabilit
 | Part | Where | Role |
 |---|---|---|
 | `sentinel-guard` | `guard/cmd/sentinel-guard` | The service: two admission webhooks, the action API, JWKS, metrics. Modes `kubernetes` (in a cluster) and `memory` (one process, `docker run`) |
-| `kubectl-sentinel` | `guard/cmd/kubectl-sentinel` | The kubectl plugin: `requests`, `describe`, `approve`, `deny`, `audit verify` |
-| Core | `guard/internal/guard` | Request lifecycle (`engine.go`), policy (`policy.go`), change classification (`classify.go`), capabilities and signatures (`signer.go`), audit chain (`audit.go`), Prometheus preconditions (`precondition.go`) |
+| `kubectl-sentinel` | `guard/cmd/kubectl-sentinel` | The kubectl plugin: `requests`, `describe`, `approve`, `deny`, `audit verify`, `audit export`, and offline `audit verify --bundle` |
+| Core | `guard/internal/guard` | Request lifecycle (`engine.go`), policy (`policy.go`), change classification (`classify.go`), capabilities and signatures (`signer.go`), audit chain (`audit.go`), evidence bundle and oversight summary (`evidence.go`), Prometheus preconditions (`precondition.go`) |
 | Storage | `guard/internal/store` | `Memory` (one process) and `Kube` (ActionRequest objects, watch cache, compare-and-swap writes) |
-| Transport | `guard/internal/server` | HTTP handlers, both webhooks, metrics |
+| Transport | `guard/internal/server` | HTTP handlers, both webhooks, metrics, the guardian monitor (`monitor.go`) |
 | Kubernetes glue | `guard/internal/kube` | Creates its TLS certificate and signing key on first start, keeps the webhook CA bundles, publishes the JWKS, TokenReview authentication |
 | Chart | `deploy/helm/sentinel-guard` | CRD, 3 replicas + PDB, RBAC (the guard, approvers, viewers), both webhook configurations, policy ConfigMap |
 | Default policy | `guard/policies/default.yaml` | Embedded in the binary |
@@ -82,7 +82,7 @@ Every event (`requested`, `blocked`, `approved`, `denied`, `capability-issued`, 
 - `Digest` covers the request's identity fields, so editing what was requested breaks every event of that request.
 - `Sig` is an ES256 signature over the hash.
 
-The head (`seq`, `hash`) lives in the ConfigMap `sentinel-guard-audit-head`; the public key in `sentinel-guard-jwks`.
+The head (`seq`, `hash`) lives in the ConfigMap `sentinel-guard-audit-head`; the public key in `sentinel-guard-jwks`. Since Phase 14 every new head is also signed (`at`, `kid`, `sig`): a checkpoint (§11).
 
 **Writes:**
 1. `transition` first checks the change against the current (cached) state. A refused attempt, such as a replayed capability, writes nothing.
@@ -97,7 +97,7 @@ If step 3 loses a race, the claimed place becomes a **signed void** (`Head.Voids
 - the digests against the requests;
 - the head hash.
 
-It reports: an edited request; a deleted request (a gap); a forged event or void; a broken link.
+It reports: an edited request; a deleted request (a gap); a forged event or void; a broken link; since Phase 14, a forged head signature (an unsigned head from an older guard is only a warning).
 
 ## 6. Kubernetes integration
 - **Workloads webhook** (validating, `failurePolicy: Fail`, `sideEffects: NoneOnDryRun`, 5 s timeout).
@@ -133,24 +133,25 @@ For agents outside Kubernetes, an approved request yields one ES256 JWT:
 It is issued once (`capability-issued` records the `jti`). The executor calls `POST /v1/capabilities/spend`, which verifies it (algorithm pinned, issuer, audience, expiry) and moves the request `Approved → Executed` only if the `jti` matches: single use, enforced by the store's compare-and-swap. The API's fingerprint is a digest of the proposed `change` map, so an approval for €42 doesn't cover €4,200 (unit test).
 
 ## 8. Measured
-All numbers from `scripts/guard-e2e.sh` with `LOAD=1` on a fresh kind cluster (1 node, Docker Desktop, Apple Silicon), 3 guard replicas, 2026-10-23. Raw data: [`evals/guard/latency.json`](../../evals/guard/latency.json). Latency is measured by the client through the API server (TLS, the webhook call, the guard's work, the write), with `test/loadgen`.
+All numbers from `scripts/guard-e2e.sh` with `LOAD=1` on a fresh kind cluster (1 node, Docker Desktop, Apple Silicon), 3 guard replicas, re-measured 2026-10-24 after Phase 14 (which adds a signed checkpoint to every event). Raw data: [`evals/guard/latency.json`](../../evals/guard/latency.json). Latency is measured by the client through the API server (TLS, the webhook call, the guard's work, the write), with `test/loadgen`.
 
 | Scenario | n | p50 | p95 | p99 | max |
 |---|---|---|---|---|---|
-| Human scales a deployment (the guard is never called) | 400 | 2.3 ms | 3.4 ms | 4.9 ms | 9.5 ms |
-| Agent repeats a change that's pending (denied after a cache lookup) | 400 | 2.1 ms | 3.2 ms | 4.6 ms | 12.6 ms |
-| Agent's change after a human approved it (admitted once) | 100 | 26.8 ms | 35.6 ms | **42.9 ms** | 45.2 ms |
-| Worst case: approval and retry in the same instant (the decision is applied on the request path) | 100 | 23.7 ms | 31.1 ms | 37.5 ms | 43.6 ms |
+| Human scales a deployment (the guard is never called) | 400 | 3.2 ms | 5.6 ms | 8.8 ms | 35.7 ms |
+| Agent repeats a change that's pending (denied after a cache lookup) | 400 | 2.4 ms | 4.7 ms | 6.0 ms | 14.8 ms |
+| Agent's change after a human approved it (admitted once) | 100 | 24.7 ms | 31.9 ms | **40.8 ms** | 44.0 ms |
+| Worst case: approval and retry in the same instant (the decision is applied on the request path) | 100 | 28.5 ms | 37.0 ms | 45.6 ms | 56.6 ms |
 
 ![Sentinel Guard: p99 latency through the API server](images/17-chart-guard-latency.png)
 
 *Figure 17.4: Sentinel Guard: p99 latency through the API server*
 
-- **What a pending check costs:** the same as no guard at all (2.1 vs 2.3 ms at p50), because it is served from the watch cache.
-- **The approved path** makes two writes: the chain head, and the request's state together with its event. p99 is 42.9 ms, under the 50 ms target.
+- **What a pending check costs:** no more than no guard at all (2.4 vs 3.2 ms at p50), because it is served from the watch cache.
+- **The approved path** makes two writes: the chain head, and the request's state together with its event. p99 is 40.8 ms, under the 50 ms target.
+- **Run-to-run variation.** The Phase 10 run measured 42.9 ms on the approved path and 4.9 ms for the human baseline. The human path never calls the guard, so its rise to 8.8 ms here is the host: a laptop, with other work running during this run. The extra checkpoint signature costs about 26 µs (`BenchmarkSignHash`), which these numbers can't resolve. Read the table as "tens of milliseconds for an approved change, single digits otherwise".
 - **Safety under load:** every load round also asserts that an unapproved change is denied, that a different change doesn't ride on an approval, and that the same change after a revert needs a new approval. The chain verified after 615 events across 211 requests, **with no voids** (no lost races).
-- **Guard down:** humans' changes still go through and agents' changes are refused. After scaling back up from zero, the guard answered again within **1 s**.
-- **The end-to-end suite:** 25 checks, all passing (chapter 14).
+- **Guard down:** humans' changes still go through and agents' changes are refused. After scaling back up from zero, the guard answered again within **2 s** (1 s in the Phase 10 run).
+- **The end-to-end suite:** 31 checks, all passing (chapter 14). The 6 added in Phase 14 cover policy versions, the signed head, offline verification of the export, tamper detection, every replica's self-verification, and a later export extending an archived one.
 
 ## 9. Configuration
 Environment variables and chart values: [chapter 13 §8](13-deployment-and-operations.md#8-sentinel-guard). Metrics: [chapter 12 §2](12-observability.md#2-metrics-catalog-prometheus). Endpoints and the CRD: [chapter 09 §8](09-api-and-contracts.md#8-sentinel-guard).
@@ -187,3 +188,47 @@ Design record: [ADR-0012](../adr/0012-sdks-and-the-mcp-proxy.md).
 - TypeScript: 6 tests.
 - The refund example (`examples/guarded-refunds`) ran as documented: pending → approved with the printed `curl` → refunded once → the same refund again opened a new request.
 
+
+## 11. Governance: evidence, policy versions, guardian monitoring (Phase 14)
+
+![Evidence and guardian monitoring: what is signed, where it lives, and who checks it](images/17-guard-evidence.png)
+
+*Figure 17.6: Evidence and guardian monitoring: what is signed, where it lives, and who checks it*
+
+Design record: [ADR-0014](../adr/0014-governance-evidence-and-guardian-monitoring.md). User-facing: [docs/compliance](../compliance/README.md).
+
+**Policy versions.**
+- `Policy.Canonical()` marshals the *effective* policy (defaults applied; the guard's own namespace and memory-mode delegates added). Its SHA-256 is the version.
+- `Engine.SetPolicy` computes it once. `Engine.RecordPolicy` signs `sha256("policy|version|loadedAt")` and stores the record (Memory, or one key per version in the ConfigMap `sentinel-guard-policies`); a version already stored keeps its first record.
+- `create()` records the version before the first request that names it, so no request can name an unkept policy.
+- `Request.PolicyVersion` joins the request digest (only when set, so pre-Phase-14 requests still verify).
+
+**Signed checkpoints.** `chain()` signs the new head (`sha256("head|seq|hash|at")`) in the same compare-and-swap that claims the event's place. That is one extra ES256 signature per event: about 26 µs (`BenchmarkSignHash`, M1 Pro). Voids keep the head's signature; they are signed themselves.
+
+**The evidence bundle** (`evidence.go`).
+- `BuildEvidence` orders requests by their first event and policies by load time, and attaches `Summarize(requests)`.
+- `VerifyEvidence(bundle, keys)` runs `VerifyAudit`, then checks:
+  - each policy (hash of its text, signature);
+  - that every request's version is kept;
+  - each request's phase, decision and decider against its signed events (`consistency`);
+  - the summary against a recomputed one.
+- `keys == nil` means "the bundle's own keys", reported by ID.
+- `Engine.Verify` now goes through the same path, so the HTTP verify, the monitor and `kubectl sentinel audit verify` check exactly what an auditor checks.
+
+**The oversight summary** derives everything from signed events:
+- outcome counts overall and per agent: `proposed` / `blocked` / `auto_approved` / `approved` / `denied` / `executed` / `expired` (`EventOutcome`, shared with the metric);
+- who decided (a person, or "person via delegate");
+- expiries nobody decided;
+- median and longest time from request to human decision.
+
+**Anchoring.** `Continues(older, newer)` requires the head not to go back, and every event and void of the older bundle to be present and unchanged in the newer one (`audit verify --previous`). That catches the one thing a signed head can't: a restored older signed head with the newest events removed.
+
+**The guardian monitor** (`server/monitor.go`, every replica, from its watch cache):
+- every 15 s: open requests by phase, the oldest undecided request's age, the head's sequence;
+- every `SENTINEL_GUARD_VERIFY_INTERVAL` (5 min): a full `Verify`, giving `sentinel_guard_audit_chain_ok` and a timestamp; a failure is also logged with the problems;
+- `sentinel_guard_agent_outcomes_total` is counted in the event hook;
+- the alert rules are in chapter 12.
+
+**Measured** (`BenchmarkVerifyEvidence`, Apple M1 Pro): verifying 1,000 approved-and-executed requests (3,000 events) takes **about 0.18 s**, almost all of it ECDSA verification. The bundle is **about 2.1 KB per request** (compact JSON).
+
+**Bug found and fixed.** The CRD schema lacked `spec.decidedVia`, so the API server pruned it. Delegated decisions in Kubernetes mode (the copilot's path since Phase 11) kept the delegate only in the signed event's detail. The schema now has `decidedVia` and `policyVersion`; the e2e checks that `policyVersion` survives.

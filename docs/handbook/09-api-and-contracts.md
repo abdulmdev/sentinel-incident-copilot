@@ -224,7 +224,8 @@ Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8
 | `POST /v1/capabilities/spend` | none (the capability is the credential) | `{capability, executor?}` → `200 {request, claims}` · `409` already used / no longer valid · `403` invalid (signature, `alg`, issuer, audience, expiry) |
 | `GET /v1/actions` | admin token (memory mode) | `{requests: [...]}` |
 | `POST /v1/actions/{id}/approve`, `/deny` | the admin token (memory mode), or a **delegate** (policy `delegates`; Phase 11): a service that authenticated the person itself, e.g. Sentinel's gateway. In Kubernetes there is no admin token: people approve with `kubectl sentinel`, and only delegates use HTTP (others: 403) | `{approver, note?}` → the request, with `decidedBy` = approver and `decidedVia` = the delegate (the audit event reads "… [via …]"). 403 if the approver or the delegate is the requester; 409 if decided or expired |
-| `GET /v1/audit/verify` | admin token | `{ok, events, requests, headSeq, voided, problems[]}` |
+| `GET /v1/audit/verify` | admin token, or an **auditor** (policy `auditors`; Phase 14) | `{ok, events, requests, headSeq, voided, policies, problems[], warnings[]}` |
+| `GET /v1/audit/export` | admin token, or an auditor (Phase 14) | the evidence bundle (below), with `Content-Disposition: attachment; filename="sentinel-guard-evidence-<UTC time>.json"` |
 | `GET /.well-known/jwks.json` | none | ES256 public key (`kid` = thumbprint) |
 | `GET /healthz`, `/readyz` | none | readiness waits for the watch cache and bootstrap |
 
@@ -237,6 +238,16 @@ Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8
 - `jti`, `iat`, `exp` (= the approval's expiry);
 - `request_id`, `action`, `target`, `fingerprint`, `approved_by`.
 
+**Evidence bundle** (`format: sentinel-guard-evidence/v1`; Phase 14):
+- `generatedAt`, `generatedBy`;
+- `jwks`;
+- `head`: `{seq, hash, voids[], at, kid, sig}`, the signature over `sha256("head|seq|hash|at")`;
+- `policies[]`: `{version, text, loadedAt, kid, sig}`, where `version` = SHA-256 of `text` and the signature is over `sha256("policy|version|loadedAt")`;
+- `requests[]`: as stored, each with its `audit` events, in chain order;
+- `summary`: `{requests, from, to, outcomes, byAgent, deciders, expiredUndecided, decisionSecondsMedian, decisionSecondsMax}`.
+
+The bundle carries no signature of its own: every part is signed, and verifiers recompute the summary. Each request's `policyVersion` is part of its digest when present.
+
 ### 8.2 Admission webhooks
 | Webhook | Path | Sees | Answers |
 |---|---|---|---|
@@ -244,5 +255,11 @@ Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8
 | `approvals.guard.sentinel.dev` (mutating, fail closed) | `/admission/approvals` | every ActionRequest CREATE/UPDATE/DELETE | the guard's own SA: allowed; others: only `spec.decision` (`approve`/`deny`) once, plus `decisionNote`, patched with `decidedBy`/`decidedAt` from the authenticated user |
 
 ### 8.3 kubectl plugin
-`kubectl sentinel requests [--all] [-o json]` · `describe <id>` · `approve <id> [-m note]` · `deny <id> [-m note]` · `audit verify` (exit 2 on any problem) · `version`. Flags: `--guard-namespace`, `--context`, `--kubeconfig`.
+`kubectl sentinel requests [--all] [-o json]` · `describe <id>` · `approve <id> [-m note]` · `deny <id> [-m note]` · `audit verify` (exit 2 on any problem) · `audit export` (the evidence bundle to stdout; Phase 14) · `audit verify --bundle <file> [--jwks <keys>] [--previous <older bundle>]` (offline, no cluster access; `--previous` also requires the bundle to extend the older one) · `version`. Flags: `--guard-namespace`, `--context`, `--kubeconfig`.
+
+### 8.4 Objects the guard keeps (Phase 14 additions)
+- `ActionRequest.spec.policyVersion`: the effective policy's SHA-256.
+- `ActionRequest.spec.decidedVia`: the delegate, now in the CRD schema. Before, the API server pruned it, so Kubernetes-mode delegated decisions kept the delegate only in the event detail.
+- ConfigMap `sentinel-guard-policies`: one key `<version>.json` per policy version, a signed `PolicyRecord`.
+- ConfigMap `sentinel-guard-audit-head`: now also `at`, `kid`, `sig` (the signed checkpoint).
 

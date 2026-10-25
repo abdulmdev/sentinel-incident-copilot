@@ -1,0 +1,11 @@
+# The walkthrough's policy: refunds need a human, receipts run on their own (and are recorded),
+# deleting customer data is never allowed for an agent.
+agents:
+  users: [refund-bot]
+defaults: {risk: medium, autonomy: approve}
+pendingTTL: 1h
+approvalTTL: 10m
+actions:
+  refund:               {risk: high}
+  send-receipt:         {risk: low, autonomy: observe}
+  delete-customer-data: {risk: high, autonomy: deny}

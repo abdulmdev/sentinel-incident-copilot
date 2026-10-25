@@ -61,9 +61,11 @@ spec:
                 risk: {type: string}
                 autonomy: {type: string}
                 createdAt: {type: string}
+                policyVersion: {type: string, description: "SHA-256 of the effective policy the request was evaluated under (see the sentinel-guard-policies ConfigMap)."}
                 decision: {type: string, enum: [approve, deny], description: "Set by an approver (kubectl sentinel approve / deny)."}
                 decisionNote: {type: string}
                 decidedBy: {type: string, description: "Stamped by the guard's webhook from the authenticated identity."}
+                decidedVia: {type: string, description: "The delegate that authenticated decidedBy (for example Sentinel's gateway), if any."}
                 decidedAt: {type: string}
             status:
               type: object

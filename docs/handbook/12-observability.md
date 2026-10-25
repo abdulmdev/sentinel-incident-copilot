@@ -76,6 +76,13 @@ Alert-opened incidents keep one trace too: the webhook's request span continues 
 | `sentinel_guard_verdicts_total` | sentinel-guard | counter `{source, action, verdict}` | Decisions on agent actions: `allow`, `pending`, `block` (source `admission` or `api`) |
 | `sentinel_guard_admission_duration_seconds` | sentinel-guard | histogram `{webhook, allowed}` (1 ms … 2.5 s) | Time to answer an admission review (`workloads`, `approvals`) |
 | `sentinel_guard_audit_events_total` | sentinel-guard | counter `{type}` | Events appended to the audit chain (`requested`, `approved`, `executed`, `readmitted`, …) |
+| `sentinel_guard_agent_outcomes_total` | sentinel-guard | counter `{agent, action, outcome}` | What each agent's proposals came to: `proposed` (waiting for a person), `blocked`, `auto_approved`, `approved`, `denied`, `executed`, `expired`. Counted by the replica that recorded the event: sum across replicas (Phase 14) |
+| `sentinel_guard_requests_open` | sentinel-guard | gauge `{phase}` | Requests that can still lead to an execution: `Pending`, `Approved` (every replica, from its watch cache) |
+| `sentinel_guard_oldest_pending_seconds` | sentinel-guard | gauge | Age of the oldest request waiting for a human decision (0 if none) |
+| `sentinel_guard_audit_chain_ok` | sentinel-guard | gauge | 1 if this replica's last self-verification of the whole chain passed, 0 if it found a problem |
+| `sentinel_guard_audit_last_verified_timestamp_seconds` | sentinel-guard | gauge | When this replica last verified the chain (every `SENTINEL_GUARD_VERIFY_INTERVAL`, default 5 min) |
+| `sentinel_guard_audit_head_seq` | sentinel-guard | gauge | The chain head's sequence. It only grows; `SentinelGuardAuditHeadWentBack` fires if it goes down |
+| `sentinel_guard_policy_info` | sentinel-guard | gauge `{version}` | 1 for the policy version in force (first 12 hex characters) |
 
 Scrape targets: gateway and ingestion `/actuator/prometheus`; agent `/metrics`; chaos-lab `/metrics`; sentinel-guard `:9090/metrics` (`serviceMonitor.enabled` in its chart). Rule evaluation every 5 s; alerts go to Alertmanager (`:9093`), which posts to the gateway (chapter 06 B.4, chapter 13).
 
@@ -84,6 +91,22 @@ Scrape targets: gateway and ingestion `/actuator/prometheus`; agent `/metrics`; 
 *Figure 12.7: Prometheus scrape targets in the local stack, all up*
 
  Configs: `deploy/prometheus/prometheus.yml` (compose) and `prometheus-local.yml` (`dev-local.sh`, `host.docker.internal`). Kubernetes pods carry `prometheus.io/*` annotations.
+
+### Guardian alerts (Sentinel Guard, Phase 14)
+`deploy/helm/sentinel-guard/alerts/guard-alerts.yaml` holds 6 recording rules and 8 alerts. The chart renders it as a PrometheusRule with `prometheusRule.enabled=true`. `guard-alerts.test.yaml` unit-tests every alert with `promtool test rules`, in CI: each fires on the behaviour it is for and stays quiet on a steady agent.
+
+| Alert | Expression (abridged) | Severity |
+|---|---|---|
+| `SentinelGuardAuditChainBroken` | `min(sentinel_guard_audit_chain_ok) == 0` for 1 m | critical |
+| `SentinelGuardAuditNotVerified` | last verification older than 30 min, for 5 m | warning |
+| `SentinelGuardAuditHeadWentBack` | head below its 1 h maximum, for 5 m | critical |
+| `SentinelGuardApprovalBacklog` | oldest pending > 30 min, for 5 m | warning |
+| `SentinelGuardAgentBlockedBurst` | ≥ 5 blocked in 10 min, per agent | warning |
+| `SentinelGuardAgentRejectionDrift` | blocked + denied share (1 h) > 25 % and > 2 × its 7 d share, ≥ 5 attempts, for 10 m | warning |
+| `SentinelGuardHumanOverrides` | denied / decided (24 h) > 50 %, ≥ 4 decisions | warning |
+| `SentinelGuardAgentEscalationDrift` | share needing a person (1 h) > 50 % and > 2 × its 7 d share, ≥ 5 attempts, for 10 m | info |
+
+Attempts are `proposed + blocked + auto_approved`: each proposal ends as exactly one of them. The thresholds are starting points, not tuned on real traffic.
 
 ## 3. Dashboard (`deploy/grafana/dashboards/sentinel.json`, provisioned)
 

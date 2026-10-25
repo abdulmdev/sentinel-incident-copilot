@@ -107,6 +107,9 @@ type Request struct {
 	ExecGeneration int64      `json:"execGeneration,omitempty"` // the target's generation when admitted
 	CapabilityJTI  string     `json:"capabilityJti,omitempty"`
 	Audit          []Event    `json:"audit,omitempty"`
+
+	// PolicyVersion is the effective policy (PolicyRecord.Version) the request was evaluated under.
+	PolicyVersion string `json:"policyVersion,omitempty"`
 }
 
 // Digest covers the request's identity fields; every audit event carries it, so editing what
@@ -121,8 +124,12 @@ func (r *Request) Digest() string {
 	for _, k := range keys {
 		fmt.Fprintf(&change, "%s=%s;", k, r.Change[k])
 	}
-	return sha(strings.Join([]string{r.ID, r.Key, r.Source, r.Agent, r.Action, r.Target.Group, r.Target.String(),
-		r.Fingerprint, r.Intent, change.String(), r.CreatedAt.UTC().Format(time.RFC3339Nano)}, "|"))
+	fields := []string{r.ID, r.Key, r.Source, r.Agent, r.Action, r.Target.Group, r.Target.String(),
+		r.Fingerprint, r.Intent, change.String(), r.CreatedAt.UTC().Format(time.RFC3339Nano)}
+	if r.PolicyVersion != "" { // requests from guards before 2.0.0-alpha.3 have none
+		fields = append(fields, "policy="+r.PolicyVersion)
+	}
+	return sha(strings.Join(fields, "|"))
 }
 
 // RequestKey is the approval binding: an approval for one change never admits a different one.
@@ -135,12 +142,32 @@ func sha(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// Head is the tip of the global audit chain, plus any voided places (see Void).
+// Head is the tip of the global audit chain, plus any voided places (see Void). The guard signs
+// each new head (a checkpoint), so the head can't be rewound to hide the newest events without
+// the guard's key, short of replaying an older signed head (see the evidence export).
 type Head struct {
 	Seq   int64  `json:"seq"`
 	Hash  string `json:"hash"`
 	Voids []Void `json:"voids,omitempty"`
+	At    string `json:"at,omitempty"` // when the guard signed this head (RFC 3339, UTC)
+	Kid   string `json:"kid,omitempty"`
+	Sig   string `json:"sig,omitempty"`
 }
+
+func (h Head) SigningHash() string { return sha(fmt.Sprintf("head|%d|%s|%s", h.Seq, h.Hash, h.At)) }
+
+// PolicyRecord is one version of the effective policy, kept so every request can be traced to
+// the rules it was decided under. Version is the SHA-256 of Text; the signature covers it and
+// when a guard first loaded it.
+type PolicyRecord struct {
+	Version  string `json:"version"`
+	Text     string `json:"text"`
+	LoadedAt string `json:"loadedAt"` // RFC 3339, UTC
+	Kid      string `json:"kid"`
+	Sig      string `json:"sig"`
+}
+
+func (p PolicyRecord) SigningHash() string { return sha("policy|" + p.Version + "|" + p.LoadedAt) }
 
 // Void marks a claimed place in the chain whose event never landed (a replica lost a race, or a
 // write failed). It is signed, so nobody without the guard's key can use voids to hide a deletion.
@@ -171,4 +198,7 @@ type Store interface {
 	Head(ctx context.Context) (Head, error)
 	// AdvanceHead applies fn to the current head and stores the result atomically.
 	AdvanceHead(ctx context.Context, fn func(Head) (Head, error)) (Head, error)
+	// RecordPolicy keeps a policy version; a version already recorded keeps its first record.
+	RecordPolicy(ctx context.Context, p PolicyRecord) error
+	Policies(ctx context.Context) ([]PolicyRecord, error)
 }

@@ -30,6 +30,13 @@ delegates:
   users: []
   groups: []
 
+# Identities that may read the audit trail and export evidence over the HTTP API
+# (GET /v1/audit/export, /v1/audit/verify), for example a CronJob's ServiceAccount that archives
+# evidence. People export with `kubectl sentinel audit export` and their own RBAC (viewer role).
+auditors:
+  users: []
+  groups: []
+
 # Also serve the action API (not the webhooks) over plain HTTP inside the cluster, for clients
 # that can't trust the guard's private CA (agents and executors in other namespaces).
 api:
@@ -71,3 +78,9 @@ networkPolicy:
 
 serviceMonitor:
   enabled: false
+
+# Guardian monitoring alerts (needs the Prometheus Operator): audit chain integrity, approval
+# backlog, and drift in each agent's behaviour. The rules are alerts/guard-alerts.yaml.
+prometheusRule:
+  enabled: false
+  labels: {}   # e.g. {release: kube-prometheus-stack}, to match your Prometheus ruleSelector

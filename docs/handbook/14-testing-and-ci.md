@@ -1,6 +1,6 @@
 # 14 Testing and CI
 
-**290 automated tests** (measured 2026-10-24; 277 after Phase 12, 252 after Phase 11, 244 after Phase 10, 212 before it):
+**305 automated tests** (measured 2026-10-24; 290 after Phase 13, 277 after Phase 12, 252 after Phase 11, 244 after Phase 10, 212 before it):
 
 | Suite | Tests |
 |---|---|
@@ -8,7 +8,7 @@
 | Python SDK + MCP proxy | 19 (against the real guard binary) |
 | TypeScript SDK | 6 (against the real guard binary) |
 | gateway | 93 (67 unit/slice + 26 integration) |
-| sentinel-guard (Go) | 34 (30 test functions + 4 subtests), run with the race detector |
+| sentinel-guard (Go) | 49 (37 test functions + 12 subtests), run with the race detector |
 | agent | 72 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
 | mcp-remediation | 17 |
 | eval scorer + runner | 14 |
@@ -19,11 +19,12 @@ Plus:
 - the console production build (type check);
 - two benchmark gates (main + held-out);
 - Helm lint and strict schema validation for 3 overlays, and `terraform validate`;
-- `promtool check rules` and `amtool check-config` for the alerting config;
+- `promtool check rules` for the lab's and the guard's alert rules, and **`promtool test rules`** for the guard's: 6 scenarios, 15 assertions, each alert firing on the behaviour it is for and quiet on a steady agent (Phase 14); `amtool check-config` was run by hand in Phase 7;
 - `scripts/check_chart_secrets.py` (who may hold which secret, production and kind values);
 - k6 load thresholds;
 - a **scripted live closed-loop scenario** (section 4);
-- **Sentinel Guard end to end** on a real API server: 25 checks, a load run and the guard taken down (section 4A).
+- **Sentinel Guard end to end** on a real API server: 31 checks, a load run and the guard taken down (section 4A);
+- **the guard walkthrough** (`scripts/guard-demo.sh`, what Codespaces runs): 13 assertions across 11 steps, against a real guard (Phase 14).
 
 ## 1. Strategy
 
@@ -105,7 +106,7 @@ uv run --project agent-service python evals/rca/run.py --check
 | `test_auth.py` (8) | Gateway → agent: no token → 401; a token for the tenant → accepted; **another tenant's token → 403 in path and body**; tool-token audience, forged key, expired, and HS256 shared-secret tokens → 401; health and metrics open |
 | `test_postgres_checkpointer.py` (3) | Durability across processes (the approval lives in the guard, so it survives the restart too, and the incident resolves); **checkpoint RLS**: a request bound to another tenant reads nothing and can't write (`InsufficientPrivilege`), an unbound request reads nothing; tables FORCE RLS even for their owner |
 
-### sentinel-guard (34; `cd guard && go test -race ./...`)
+### sentinel-guard (49; `cd guard && go test -race ./...`)
 - **Engine** (`internal/guard/engine_test.go`):
   - an approval admits exactly once, a retry while pending reuses the request, a replay opens a new one;
   - the approval is bound to the exact change and target;
@@ -131,7 +132,17 @@ uv run --project agent-service python evals/rca/run.py --check
   - the action API end to end with JWKS;
   - **delegated decisions** (Phase 11): a non-delegate can't decide; a delegate can't approve on behalf of the requesting agent; an approval via the gateway records `decidedBy` = the person and `decidedVia` = the delegate, in the audit too; the capability carries the scope and the approved parameters; with no admin token (Kubernetes), only delegates decide over HTTP;
   - the plain-HTTP API listener serves no admission webhooks;
-  - an ActionRequest's round trip through JSON keeps the audit valid.
+  - an ActionRequest's round trip through JSON keeps the audit valid;
+  - **evidence export** (Phase 14): only the admin token or an auditor may export or verify (agents and anonymous callers get 401); the exported bundle verifies and its summary counts the denial and the decider;
+  - **guardian metrics** (Phase 14): per-agent outcomes, open requests, the oldest pending request's age, head sequence, policy info; a deleted record turns `audit_chain_ok` to 0.
+- **Evidence** (`internal/guard/evidence_test.go`, Phase 14):
+  - a history with every outcome verifies offline from the bundle alone, with the expected oversight summary (outcomes, deciders incl. "via" a delegate, undecided expiries, median and longest decision time);
+  - **8 tamperings are each caught, with the right reason:** who approved, what was asked, a record removed, the policy text, the policy a request names, the phase, the summary, the newest events cut with the head rewound;
+  - a whole history forged with another key verifies only against that key (which the verifier reports), and fails against the real one;
+  - a later bundle must extend an archived one: removed events or a head that went back are reported;
+  - the head is signed; an unsigned head from an older guard only warns; a forged head signature fails;
+  - a change the guard makes to the policy changes its version, and the new version is recorded before it is used.
+- **Benchmarks** (not counted as tests): `BenchmarkVerifyEvidence` (1,000 requests, 3,000 events: about 0.18 s; about 2.1 KB per request) and `BenchmarkSignHash` (about 26 µs), Apple M1 Pro.
 
 ### SafeActionBench (13; `bench/`: `uv run pytest`)
 - **Data:** the packaged splits and runbooks are byte-identical to `evals/rca` and `knowledge/acme`; split sizes and labels; the public incident never leaks labels.
@@ -195,9 +206,9 @@ Each metric's definition, including the edge cases: wrong escalation isn't harmf
 | `eval-gate` | Scorer tests; **benchmark regenerates byte-for-byte**; `run.py --check` on main and held-out; uploads `REPORT.md` | Metrics vs `thresholds.json` |
 | `docs` | `scripts/check_docs.py`: every Markdown link resolves; every Flyway migration in chapter 08; every env var read by code in chapter 13; every metric in chapter 12 | Docs in sync with code |
 | `web` | `npm ci && npm run build` | Build + types |
-| `deploy-config` | `helm lint` (both charts); `helm template \| kubeconform -strict` for defaults/kind/aws; **`check_chart_secrets.py`** (`--prod`: signing keys only in the gateway, no dev secret anywhere; kind: no signing material outside the gateway/web); `terraform fmt -check`, `init -backend=false`, `validate` | Validity + least privilege |
+| `deploy-config` | `helm lint` (both charts); **`promtool check rules`** (lab + guard) and **`promtool test rules`** (guardian alerts), and the PrometheusRule renders (Phase 14); `helm template \| kubeconform -strict` for defaults/kind/aws; **`check_chart_secrets.py`** (`--prod`: signing keys only in the gateway, no dev secret anywhere; kind: no signing material outside the gateway/web); `terraform fmt -check`, `init -backend=false`, `validate` | Validity + least privilege |
 | `bench` | `uv run --frozen pytest` in `bench/`: the data equals its source byte for byte; scoring, the reference guard, the MCP harness (exact parity, all 112 incidents) and `serve` over stdio; **the leaderboard page equals what the stored predictions render** | Tests + reproducibility |
-| `sdks` | Builds the guard once; the Python SDK + MCP proxy (`uv run --frozen pytest`) and the TypeScript SDK (`npm ci`, build, `node --test`) against it | Tests |
+| `sdks` | Builds the guard once; the Python SDK + MCP proxy (`uv run --frozen pytest`) and the TypeScript SDK (`npm ci`, build, `node --test`) against it; then **`scripts/guard-demo.sh`**, the walkthrough Codespaces runs, which fails if any step doesn't behave as described (Phase 14) | Tests |
 | `guard` | `gofmt` check, `go vet`, `go test -race ./...`, both binaries build (`deploy-config` also lints the guard chart and validates it with kubeconform; the CRD itself is validated by the real API server in `guard-e2e`) | Tests |
 | `guard-e2e` (needs guard, deploy-config) | `scripts/guard-e2e.sh` with `LOAD=1 LOAD_N=100` on a fresh kind cluster (section 4A) | End to end on a real API server |
 | `kind-e2e` (needs the above) | kind cluster; `scripts/kind-up.sh`; seed knowledge; inject a fault; open an incident → expect `AWAITING_APPROVAL`; **approve → expect `RESOLVED`** (capability → remediation adapter → verification, in-cluster); **assert the console pod can't reach the agent or the remediation adapter** | End to end + NetworkPolicy |
@@ -232,7 +243,7 @@ Both alert resolutions were later stamped on their incidents. While the gateway 
 The first run of step 7 failed, which is why it's in the suite now. See the Phase 7 bugs in [chapter 15](15-phase-history.md#phase-7-close-the-loop).
 
 ## 4A. Sentinel Guard end to end (`scripts/guard-e2e.sh`)
-It creates a kind cluster, builds the image and the plugin, installs the chart (3 replicas), creates an `agents/fixer` ServiceAccount with `edit` on namespace `shop`, and runs **25 checks**. Each one fails the run if it doesn't hold:
+It creates a kind cluster, builds the image and the plugin, installs the chart (3 replicas), creates an `agents/fixer` ServiceAccount with `edit` on namespace `shop`, and runs **31 checks**. Each one fails the run if it doesn't hold:
 
 1. **Setup:** installed, all replicas ready, and the guard set its own webhook CA bundle.
 2. **Who is stopped:**
@@ -251,13 +262,20 @@ It creates a kind cluster, builds the image and the plugin, installs the chart (
    - an approved restart is admitted although kubectl stamped a new time; a second restart is denied.
 5. **Policy:** scale to zero is blocked; pod deletion waits for approval.
 6. **The record:** cluster-admin can't delete an ActionRequest or edit what it requested; `kubectl sentinel audit verify` passes.
+6a. **Evidence** (Phase 14):
+   - the request names its policy version (64 hex characters, so the CRD schema keeps it) and the guard keeps that policy;
+   - the chain head carries a signature;
+   - `kubectl sentinel audit export` verifies offline (no cluster access) against the published key;
+   - an edited copy fails, naming the record;
+   - all 3 replicas report `sentinel_guard_audit_chain_ok 1`, and the agent's outcomes are counted.
 7. **Load** (`LOAD=1`, `test/loadgen`): latency for the human, pending and approved paths, while asserting in every round that nothing unapproved is admitted. The audit still verifies afterwards.
 8. **Outage:**
    - with all guard pods gone, a human's change still goes through and the agent's is refused;
    - after scaling back up, measures how long until the guard answers;
-   - the audit chain is intact.
+   - the audit chain is intact;
+   - an export taken now extends the one archived before the load run and the outage (`--previous`).
 
-Last run: 25/25 (chapter 17 §8 has the numbers).
+Last run: 31/31, 2026-10-24 (chapter 17 §8 has the numbers).
 
 ## 5. Adding tests: rules
 - New DB behavior → a Testcontainers IT that connects as `sentinel_app` (not the container superuser).

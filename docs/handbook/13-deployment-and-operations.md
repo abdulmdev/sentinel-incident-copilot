@@ -30,7 +30,7 @@ Logs go to `.logs/<service>.log`. Every health wait times out after 120 tries wi
 Then:
 - seed knowledge: `python3 scripts/seed_knowledge.py acme` (`GATEWAY_URL` overrides the target);
 - break something: `python3 chaos-lab/inject.py checkout bad_deploy`. With loadgen and Alertmanager running, **the incident opens by itself** in about 40–50 s; approve it in the console and watch it resolve (Alertmanager UI: http://localhost:9093);
-- run the demo: `scripts/demo.sh`.
+- run the demo: `scripts/guard-demo.sh`.
 
 *Pitfall (Phase 7):* `mvn package` replaces the jar under a running `java -jar` process. Rebuilding while the gateway runs breaks it (class loading), so restart after any rebuild; `build-images.sh` rebuilds the jars too.
 
@@ -276,6 +276,7 @@ Install: `helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-gu
 | `SENTINEL_GUARD_SERVICE` | `sentinel-guard` | Service name for the serving certificate |
 | `SENTINEL_GUARD_VALIDATING_WEBHOOK`, `SENTINEL_GUARD_MUTATING_WEBHOOK` | `sentinel-guard` | Webhook configurations whose CA bundle the guard maintains |
 | `SENTINEL_GUARD_ISSUER` | `sentinel-guard` | `iss` of capabilities |
+| `SENTINEL_GUARD_VERIFY_INTERVAL` | `5m` | How often each replica verifies the whole audit chain (`sentinel_guard_audit_chain_ok`; Phase 14) |
 | `SENTINEL_GUARD_AGENT_TOKENS` | generated `demo-agent` token (printed once) | memory mode: `name=token,…` for agents |
 | `SENTINEL_GUARD_ADMIN_TOKEN` | generated (printed once) | memory mode: the approver token for HTTP approvals |
 | `KUBERNETES_SERVICE_HOST` | set by Kubernetes | Only used to pick the default mode |
@@ -291,13 +292,20 @@ Install: `helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-gu
 | `webhook.timeoutSeconds`, `webhook.guardCreate`, `webhook.extraRules` | 5, false, `[]` | Webhook timeout; also guard agents' creates; more resources to guard |
 | `delegates.users`, `delegates.groups` | `[]` | Services that may record a decision on a person's behalf over HTTP (Phase 11; the sentinel chart lists its gateway) |
 | `api.plainHTTP`, `api.port` | false, 8080 | Also serve the action API in-cluster over plain HTTP (no webhooks) |
+| `auditors.users`, `auditors.groups` | `[]` | Identities that may call `GET /v1/audit/export` and `/v1/audit/verify`, e.g. a CronJob that archives evidence (Phase 14) |
+| `prometheusRule.enabled`, `prometheusRule.labels` | false, `{}` | Install the guardian alert rules as a PrometheusRule (Prometheus Operator); labels to match your Prometheus `ruleSelector` (Phase 14) |
 | `createNamespace` | false | Render the Namespace (used for `install.yaml`) |
 | `networkPolicy.enabled`, `serviceMonitor.enabled` | false, false | Optional extras |
 | `image.repository`, `image.tag` | `ghcr.io/abdulmdev/sentinel-guard`, the chart's appVersion | |
 
 ### 8.3 Operations
 - **Approve:** `kubectl sentinel approve <id> [-m note]`, or `kubectl -n sentinel-system patch actionrequest <id> --type merge -p '{"spec":{"decision":"approve"}}'`.
-- **Verify the audit trail:** `kubectl sentinel audit verify` (needs read access to ActionRequests and the two ConfigMaps; exit code 2 on any problem).
+- **Verify the audit trail:** `kubectl sentinel audit verify` (needs read access to ActionRequests and the three ConfigMaps; exit code 2 on any problem).
+- **Export and archive evidence (Phase 14):**
+  - `kubectl sentinel audit export > evidence-$(date -u +%Y-%m).json`;
+  - verify it anywhere with `kubectl sentinel audit verify --bundle <file> --jwks <keys> --previous <last archive>`;
+  - keep the files in write-once storage for your retention period. The AI Act's floor for high-risk systems is six months: [docs/compliance](../compliance/README.md).
+- **Stop every agent at once:** `kubectl -n sentinel-system scale deploy/sentinel-guard --replicas=0`. Agents' changes are refused (fail closed); humans, CI and controllers are unaffected. Scale back to resume.
 - **Break-glass:** `kubectl delete validatingwebhookconfiguration sentinel-guard` stops enforcement (re-apply the chart to restore). The deletion is in the Kubernetes audit log.
 - **Rotate the TLS certificate or signing key:** delete the Secret (`sentinel-guard-tls` / `sentinel-guard-signing`) and restart the pods. A new signing key invalidates outstanding capabilities and starts a new key id; events signed with the old key verify only while its public key is still published (key history is on the roadmap, chapter 16).
 - **Release:** pushing a `v2.*` tag runs `.github/workflows/release-guard.yml`: signed multi-arch image with SBOM and provenance, OCI chart, `install.yaml`, the plugin for 5 platforms, the krew manifest. Afterwards, commit the release's `sentinel.yaml` as `plugins/sentinel.yaml`: that directory makes this repository a krew index (`kubectl krew index add sentinel <repo>.git`). First release: `v2.0.0-alpha.1` (2026-10-23); the image and chart pull anonymously from GHCR.
@@ -334,3 +342,12 @@ Components with **`guardIdentity: true`** (agent, gateway) get:
 
 Unknown keys and modes are rejected at start.
 
+### 8.6 The demo and Codespaces (Phase 14)
+- **`scripts/guard-demo.sh`:** builds the guard and the plugin into `.demo/bin`, installs the SDK into `.demo/venv` (uv if present), starts the guard in memory mode with `examples/walkthrough/policy.yaml` and random tokens, runs `examples/walkthrough/walkthrough.py`, and stops the guard.
+  - Ports: `GUARD_PORT` (8080) and `METRICS_PORT` (9090).
+  - `scripts/guard-demo.sh kubernetes` runs `guard-e2e.sh` with `KEEP=1`.
+- **`.devcontainer/`:**
+  - Ubuntu 24.04 with Go, Docker-in-Docker, kubectl and Helm;
+  - `post-create.sh` adds kind v0.33.0 and uv, then runs `guard-demo.sh setup`;
+  - `.demo/bin` is on `PATH`, so `kubectl sentinel` works in the terminal;
+  - the default 2-core machine is enough for both demos.

@@ -49,12 +49,14 @@ type AuditReport struct {
 	Requests int      `json:"requests"`
 	HeadSeq  int64    `json:"headSeq"`
 	Voided   int      `json:"voided,omitempty"`
+	Policies int      `json:"policies"`
 	Problems []string `json:"problems,omitempty"`
+	Warnings []string `json:"warnings,omitempty"` // worth knowing, but not evidence of tampering
 }
 
 // VerifyAudit checks every event: contiguous sequence up to the head (a gap means a deleted
-// record or an interrupted write), hash links, signatures, and that each request still matches
-// what was signed.
+// record or an interrupted write), hash links, signatures, that each request still matches
+// what was signed, and the head's own signature (a checkpoint).
 func VerifyAudit(requests []*Request, head Head, keys map[string]*ecdsa.PublicKey) AuditReport {
 	rep := AuditReport{Requests: len(requests), HeadSeq: head.Seq}
 	bySeq := map[int64]Event{}
@@ -133,6 +135,15 @@ func VerifyAudit(requests []*Request, head Head, keys map[string]*ecdsa.PublicKe
 		if ok && last.Hash != head.Hash {
 			problem("chain head does not match event #%d", head.Seq)
 		}
+	}
+	switch {
+	case head.Sig != "":
+		if k, ok := keys[head.Kid]; !ok || !VerifyHashSignature(k, head.SigningHash(), head.Sig) {
+			problem("the chain head #%d has an invalid signature", head.Seq)
+		}
+	case head.Seq > 0:
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("the chain head #%d is not signed: it was last written "+
+			"by a guard older than 2.0.0-alpha.3, so removing the newest events would go unnoticed until the next event", head.Seq))
 	}
 	rep.OK = len(rep.Problems) == 0
 	return rep

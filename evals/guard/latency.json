@@ -1,32 +1,32 @@
 {
   "agent_approved_inline_worst_case": {
     "n": 100,
-    "p50_ms": 23.658,
-    "p95_ms": 31.113,
-    "p99_ms": 37.525,
-    "max_ms": 43.565
+    "p50_ms": 28.501,
+    "p95_ms": 37.048,
+    "p99_ms": 45.616,
+    "max_ms": 56.56
   },
   "agent_approved_once": {
     "n": 100,
-    "p50_ms": 26.817,
-    "p95_ms": 35.564,
-    "p99_ms": 42.926,
-    "max_ms": 45.196
+    "p50_ms": 24.709,
+    "p95_ms": 31.92,
+    "p99_ms": 40.807,
+    "max_ms": 44.047
   },
   "agent_pending": {
     "n": 400,
-    "p50_ms": 2.148,
-    "p95_ms": 3.152,
-    "p99_ms": 4.623,
-    "max_ms": 12.565
+    "p50_ms": 2.361,
+    "p95_ms": 4.662,
+    "p99_ms": 5.992,
+    "max_ms": 14.848
   },
   "baseline_human": {
     "n": 400,
-    "p50_ms": 2.258,
-    "p95_ms": 3.375,
-    "p99_ms": 4.877,
-    "max_ms": 9.523
+    "p50_ms": 3.197,
+    "p95_ms": 5.648,
+    "p99_ms": 8.783,
+    "max_ms": 35.731
   },
-  "measured_at": "2026-10-23T15:54:16+00:00",
+  "measured_at": "2026-10-24T16:09:16+00:00",
   "environment": "kind (1 node, Docker Desktop, Apple Silicon); 3 guard replicas"
 }

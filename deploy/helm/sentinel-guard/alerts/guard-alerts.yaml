@@ -1,0 +1,117 @@
+# Guardian monitoring for Sentinel Guard: the audit trail stays intact, humans keep up with
+# oversight, and each agent's behaviour doesn't drift. A Prometheus rule file; the chart renders it
+# as a PrometheusRule (prometheusRule.enabled), and guard-alerts.test.yaml tests it with promtool.
+# Thresholds are starting points: tune them to your agents' normal volume.
+groups:
+  - name: sentinel-guard-recording
+    rules:
+      # Attempts: every proposal ends up proposed (waiting for a human), blocked or auto_approved.
+      - record: sentinel_guard:agent_attempts:increase1h
+        expr: sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome=~"proposed|blocked|auto_approved"}[1h]))
+      - record: sentinel_guard:agent_attempts:increase7d
+        expr: sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome=~"proposed|blocked|auto_approved"}[7d]))
+      # Rejections: policy blocked it, or a human denied it.
+      - record: sentinel_guard:agent_rejection_ratio:1h
+        expr: |
+          sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome=~"blocked|denied"}[1h]))
+            / sentinel_guard:agent_attempts:increase1h
+      - record: sentinel_guard:agent_rejection_ratio:7d
+        expr: |
+          sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome=~"blocked|denied"}[7d]))
+            / sentinel_guard:agent_attempts:increase7d
+      # Escalation: the share of attempts that needed a human rather than running on policy.
+      - record: sentinel_guard:agent_escalation_ratio:1h
+        expr: |
+          sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome="proposed"}[1h]))
+            / sentinel_guard:agent_attempts:increase1h
+      - record: sentinel_guard:agent_escalation_ratio:7d
+        expr: |
+          sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome="proposed"}[7d]))
+            / sentinel_guard:agent_attempts:increase7d
+
+  - name: sentinel-guard-integrity
+    rules:
+      - alert: SentinelGuardAuditChainBroken
+        expr: min(sentinel_guard_audit_chain_ok) == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: The guard's audit chain failed self-verification
+          description: >-
+            A record was edited, deleted or forged since it was written. Run `kubectl sentinel audit verify`
+            for the details, and keep the evidence: `kubectl sentinel audit export > evidence.json`.
+
+      - alert: SentinelGuardAuditNotVerified
+        expr: time() - max(sentinel_guard_audit_last_verified_timestamp_seconds) > 1800
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: No guard replica has verified the audit chain for over 30 minutes
+          description: Self-verification runs every 5 minutes by default (SENTINEL_GUARD_VERIFY_INTERVAL). Check the guard's logs.
+
+      - alert: SentinelGuardAuditHeadWentBack
+        expr: max(max_over_time(sentinel_guard_audit_head_seq[1h])) > max(sentinel_guard_audit_head_seq)
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: The audit chain head moved backwards
+          description: >-
+            The chain only grows, so the newest events were cut and an older signed head restored.
+            Compare with your latest archived evidence export. (In memory mode a restart also resets the chain.)
+
+  - name: sentinel-guard-oversight
+    rules:
+      - alert: SentinelGuardApprovalBacklog
+        expr: max(sentinel_guard_oldest_pending_seconds) > 1800
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: An agent has waited over 30 minutes for a human decision
+          description: >-
+            Requests expire undecided after pendingTTL. Run `kubectl sentinel requests` and approve or deny,
+            or check that approvers are being notified.
+
+  - name: sentinel-guard-agent-drift
+    rules:
+      - alert: SentinelGuardAgentBlockedBurst
+        expr: sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome="blocked"}[10m])) >= 5
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $labels.agent }} hit policy limits {{ $value | printf "%.0f" }} times in 10 minutes'
+          description: >-
+            An agent repeatedly trying what policy forbids is often stuck in a loop, or following
+            instructions it shouldn't (prompt injection). Its blocked requests are in `kubectl sentinel requests --all`.
+
+      - alert: SentinelGuardAgentRejectionDrift
+        expr: |
+          sentinel_guard:agent_rejection_ratio:1h > 0.25
+            and sentinel_guard:agent_rejection_ratio:1h > 2 * sentinel_guard:agent_rejection_ratio:7d
+            and sentinel_guard:agent_attempts:increase1h >= 5
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $labels.agent }}: {{ $value | humanizePercentage }} of its actions blocked or denied in the last hour'
+          description: More than twice its 7-day rate. Its proposals no longer match what policy and people accept.
+
+      - alert: SentinelGuardHumanOverrides
+        expr: |
+          sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome="denied"}[24h]))
+            / sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome=~"approved|denied"}[24h])) > 0.5
+          and sum by (agent) (increase(sentinel_guard_agent_outcomes_total{outcome=~"approved|denied"}[24h])) >= 4
+        labels: {severity: warning}
+        annotations:
+          summary: 'Reviewers denied {{ $value | humanizePercentage }} of what {{ $labels.agent }} asked for in 24 hours'
+          description: People are overriding this agent more often than they accept it. Review its recent proposals and denial notes.
+
+      - alert: SentinelGuardAgentEscalationDrift
+        expr: |
+          sentinel_guard:agent_escalation_ratio:1h > 0.5
+            and sentinel_guard:agent_escalation_ratio:1h > 2 * sentinel_guard:agent_escalation_ratio:7d
+            and sentinel_guard:agent_attempts:increase1h >= 5
+        for: 10m
+        labels: {severity: info}
+        annotations:
+          summary: '{{ $labels.agent }} needs a human for {{ $value | humanizePercentage }} of its actions, over twice its usual rate'
+          description: >-
+            Actions it normally takes on policy (autonomy auto) now wait for people: their preconditions are
+            not being observed. Check the telemetry the preconditions query, or what the agent is attempting.

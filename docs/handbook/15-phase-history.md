@@ -595,6 +595,58 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 - **Held-out split:** the same baselines and the rules give the same shape (the reference agent and rules lose 2 good fixes to the guard).
 - **290 automated tests.**
 
+## Phase 14: Governance and compliance
+**Goal:** make what agents did provable to people outside the cluster (auditors, customers, regulators), trace every decision to the rules in force, watch agents' behaviour continuously, and let anyone try the guard in one click ([ADR-0014](../adr/0014-governance-evidence-and-guardian-monitoring.md)).
+
+**Built**
+- **Evidence export:**
+  - `kubectl sentinel audit export` (the user's own RBAC) and `GET /v1/audit/export` (admin or policy `auditors`): one self-verifying bundle (`sentinel-guard-evidence/v1`);
+  - offline verification: `kubectl sentinel audit verify --bundle [--jwks] [--previous]`;
+  - an oversight summary recomputed from the signed events.
+- **Policy versions:** each request's digest includes the SHA-256 of the effective policy; every version is kept signed in `sentinel-guard-policies`.
+- **Signed checkpoints:** every chain head is signed. `--previous` checks a newer bundle extends an archived one.
+- **Guardian monitoring:**
+  - every replica re-verifies the chain (`SENTINEL_GUARD_VERIFY_INTERVAL`, 5 min);
+  - 7 new metrics (per-agent outcomes, open requests, oldest pending, chain OK, last verified, head sequence, policy info);
+  - 6 recording rules and 8 alerts, shipped as a PrometheusRule and unit-tested with `promtool`.
+- **Compliance docs:** `docs/compliance/` maps features to the EU AI Act (Arts. 12, 14, 19, 26, 72, with the dates as amended by Regulation (EU) 2026/1744) and to 16 NIST AI RMF subcategories, and states what stays the provider's or deployer's.
+- **One-click demo:**
+  - `.devcontainer/` (Go, Docker-in-Docker, kubectl, Helm, kind, uv);
+  - `scripts/guard-demo.sh` with `examples/walkthrough/`: 11 steps, 13 assertions, no Docker; CI runs it;
+  - `scripts/guard-demo.sh kubernetes` for the kind e2e;
+  - an "Open in GitHub Codespaces" button in the README and on the website.
+
+**Decisions** (ADR-0014):
+- **No bundle signature:** every part is signed and the verifier recomputes the rest, so the file is equally trustworthy whoever produced it.
+- **Version the effective policy, inside the request digest.**
+- **Anchor checkpoints with archived bundles** (and Prometheus history) rather than an external log, for now.
+- **Drift is each agent against its own 7-day baseline:** ratios, explainable and testable, not ML.
+- **The compliance docs map; they don't claim.**
+
+**Bugs found and fixed**
+
+| Found | How | Fix |
+|---|---|---|
+| The CRD schema lacked `spec.decidedVia`, so the API server pruned it: delegated decisions in Kubernetes mode (the copilot's path since Phase 11) kept the delegate only in the signed event's detail | Adding `policyVersion` to the spec and checking the schema for every spec field | `decidedVia` and `policyVersion` in the schema; the e2e checks that `policyVersion` survives |
+| `decidedBy` and `phase` aren't covered by the request digest, so an edited approver would have passed chain verification | Writing the tamper tests for the evidence verifier | The verifier cross-checks phase, decision and decider against the signed events |
+| The first "forged key" test swapped only the bundle's public keys, which proves nothing (the records were still genuinely signed) | Reviewing why the case failed | A separate test: a whole history signed by another key verifies against itself, is reported by key ID, and fails against the real key |
+| The new demo script was written over the copilot's existing `scripts/demo.sh` | `git diff --stat` showed a modification where a new file was expected | The original is restored; the guard demo is `scripts/guard-demo.sh` |
+| The demo's guard process was left running after a run, because the exit trap referenced a `local` variable | The next run found port 8080 taken | A global PID for the trap |
+| Docker Desktop's VM never came up (`no route to host` to the engine) | The e2e waited on `docker info` | Restarted Docker Desktop |
+| Testing the devcontainer locally hung after the container started, with devcontainer CLI 0.80.0 | The CLI was still waiting on `docker events --filter event=start`. Docker 29's events no longer carry the old `status` and `id` fields | Tested with CLI 0.89.0. The devcontainer itself needed no change |
+
+**Results** (2026-10-24):
+- **Guard e2e: 31/31** on a fresh kind cluster, including the 6 new evidence checks.
+- **Re-measured latency:** an approved change p99 40.8 ms (42.9 ms in Phase 10); a pending one 6.0 ms; the human baseline 8.8 ms. The human path doesn't touch the guard, so its rise from 4.9 ms is host noise.
+- **Verifying** 1,000 requests (3,000 events): about 0.18 s; the bundle is about 2.1 KB per request; a checkpoint signature about 26 µs (M1 Pro).
+- **Alert rules:** 8 alerts and 6 recording rules, 15 promtool assertions passing. A mutated expectation fails, as it should.
+- **The walkthrough:** all 13 assertions pass, in about 10 s including the build.
+- **The devcontainer**, built from a clean checkout with `@devcontainers/cli` 0.89.0 (Docker 29.5.3, arm64):
+  - post-create installs kind v0.33.0 and uv and builds the demo;
+  - inside it, the walkthrough passes all 13 assertions;
+  - kind, Helm v4.3.1, `kubectl sentinel` and Docker-in-Docker (29.9.2) all run.
+- **305 automated tests** (Go 34 → 49).
+
 ---
 
 ## Template for the next entry

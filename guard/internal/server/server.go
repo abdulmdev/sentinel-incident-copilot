@@ -53,6 +53,7 @@ type Server struct {
 	Metrics    *Metrics
 	Log        *slog.Logger
 	Ready      func() bool
+	Version    string
 }
 
 func (s *Server) Handler() http.Handler { return s.handler(true) }
@@ -81,7 +82,8 @@ func (s *Server) handler(admission bool) http.Handler {
 	mux.HandleFunc("POST /v1/actions/{id}/approve", s.deciders(s.decide(true)))
 	mux.HandleFunc("POST /v1/actions/{id}/deny", s.deciders(s.decide(false)))
 	mux.HandleFunc("POST /v1/capabilities/spend", s.spend)
-	mux.HandleFunc("GET /v1/audit/verify", s.adminOnly(s.verify))
+	mux.HandleFunc("GET /v1/audit/verify", s.auditors(s.verify))
+	mux.HandleFunc("GET /v1/audit/export", s.auditors(s.export))
 	if admission {
 		mux.HandleFunc("POST /admission/workloads", s.timed("workloads", s.admitWorkload))
 		mux.HandleFunc("POST /admission/approvals", s.timed("approvals", s.admitApproval))
@@ -142,6 +144,26 @@ func (s *Server) deciders(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		writeError(w, 401, "the admin token or a delegate's token is required")
+	}
+}
+
+// auditors admits the admin token, or an identity listed in the policy's auditors (for example a
+// CronJob's ServiceAccount that archives evidence): read-only access to the audit trail.
+func (s *Server) auditors(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := bearer(r)
+		if s.AdminToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.AdminToken)) == 1 {
+			next(w, r)
+			return
+		}
+		if token != "" && s.Agents != nil {
+			if user, groups, err := s.Agents.Authenticate(r.Context(), token); err == nil && s.Engine.Policy().IsAuditor(user, groups) {
+				next(w, r)
+				return
+			}
+		}
+		writeError(w, 401, "the admin token or an auditor's token (policy auditors) is required; "+
+			"in Kubernetes, `kubectl sentinel audit export` reads the same record with your own RBAC")
 	}
 }
 
@@ -273,6 +295,19 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, rep)
 }
 
+// export serves the evidence bundle: every request, the signed chain head, every policy version
+// and the public keys. Verify it offline with `kubectl sentinel audit verify --bundle <file>`.
+func (s *Server) export(w http.ResponseWriter, r *http.Request) {
+	ev, err := s.Engine.Evidence(r.Context(), "sentinel-guard "+s.Version)
+	if err != nil {
+		s.writeErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="sentinel-guard-evidence-`+
+		s.Engine.Now().UTC().Format("20060102T150405Z")+`.json"`)
+	writeJSON(w, 200, ev)
+}
+
 func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, guard.ErrNotFound):
@@ -313,6 +348,15 @@ type Metrics struct {
 	Verdicts  *prometheus.CounterVec
 	Admission *prometheus.HistogramVec
 	Events    *prometheus.CounterVec
+	// Guardian monitoring: what each agent's proposals came to (drift in these is the signal),
+	// and the state of oversight and of the audit trail (see Monitor).
+	Outcomes      *prometheus.CounterVec
+	Open          *prometheus.GaugeVec
+	OldestPending prometheus.Gauge
+	ChainOK       prometheus.Gauge
+	HeadSeq       prometheus.Gauge
+	Verified      prometheus.Gauge
+	PolicyInfo    *prometheus.GaugeVec
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -324,8 +368,23 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Buckets: []float64{.001, .0025, .005, .01, .025, .05, .1, .25, .5, 1, 2.5}}, []string{"webhook", "allowed"}),
 		Events: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "sentinel_guard_audit_events_total",
 			Help: "Events appended to the audit chain."}, []string{"type"}),
+		Outcomes: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "sentinel_guard_agent_outcomes_total",
+			Help: "What agents' proposals came to: proposed (waiting for a human), blocked, auto_approved, approved, denied, executed, expired."},
+			[]string{"agent", "action", "outcome"}),
+		Open: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sentinel_guard_requests_open",
+			Help: "Requests that can still lead to an execution, by phase."}, []string{"phase"}),
+		OldestPending: prometheus.NewGauge(prometheus.GaugeOpts{Name: "sentinel_guard_oldest_pending_seconds",
+			Help: "Age of the oldest request waiting for a human decision (0 when none is)."}),
+		ChainOK: prometheus.NewGauge(prometheus.GaugeOpts{Name: "sentinel_guard_audit_chain_ok",
+			Help: "1 if the last self-verification of the audit chain passed, 0 if it found a problem."}),
+		HeadSeq: prometheus.NewGauge(prometheus.GaugeOpts{Name: "sentinel_guard_audit_head_seq",
+			Help: "Sequence number of the audit chain head. It only grows; a decrease means the chain was rewound."}),
+		Verified: prometheus.NewGauge(prometheus.GaugeOpts{Name: "sentinel_guard_audit_last_verified_timestamp_seconds",
+			Help: "When this replica last verified the audit chain (Unix time)."}),
+		PolicyInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sentinel_guard_policy_info",
+			Help: "The policy version in force (1 for the current version)."}, []string{"version"}),
 	}
-	reg.MustRegister(m.Verdicts, m.Admission, m.Events)
+	reg.MustRegister(m.Verdicts, m.Admission, m.Events, m.Outcomes, m.Open, m.OldestPending, m.ChainOK, m.HeadSeq, m.Verified, m.PolicyInfo)
 	return m
 }
 
@@ -342,6 +401,9 @@ func (s *Server) Hook() {
 	s.Engine.OnEvent = func(e guard.Event, r *guard.Request) {
 		if s.Metrics != nil {
 			s.Metrics.Events.WithLabelValues(e.Type).Inc()
+			if o := guard.EventOutcome(e); o != "" {
+				s.Metrics.Outcomes.WithLabelValues(r.Agent, r.Action, o).Inc()
+			}
 		}
 		s.Log.Info("audit", "seq", e.Seq, "type", e.Type, "request", r.ID, "agent", r.Agent, "action", r.Action,
 			"target", r.Target.String(), "actor", e.Actor, "detail", e.Detail, "hash", e.Hash)

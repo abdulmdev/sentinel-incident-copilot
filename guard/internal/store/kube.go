@@ -32,14 +32,16 @@ var ActionRequests = schema.GroupVersionResource{Group: "sentinel.dev", Version:
 const (
 	KeyLabel      = "sentinel.dev/key"
 	HeadConfigMap = "sentinel-guard-audit-head"
-	maxAttempts   = 20
-	keyIndex      = "key"
+	// PolicyConfigMap keeps every policy version the guard has enforced, one key per version.
+	PolicyConfigMap = "sentinel-guard-policies"
+	maxAttempts     = 20
+	keyIndex        = "key"
 )
 
 // Spec holds what was asked and the human decision (written by approvers through the API server,
 // stamped by the approval webhook); status holds what the guard did. Approvers can only patch spec.
 var (
-	specFields   = []string{"key", "source", "agent", "action", "target", "change", "fingerprint", "intent", "risk", "autonomy", "createdAt", "decision", "decidedBy", "decidedVia", "decisionNote", "decidedAt"}
+	specFields   = []string{"key", "source", "agent", "action", "target", "change", "fingerprint", "intent", "risk", "autonomy", "createdAt", "policyVersion", "decision", "decidedBy", "decidedVia", "decisionNote", "decidedAt"}
 	statusFields = []string{"phase", "reasons", "preconditions", "expiresAt", "executedAt", "exact", "execGeneration", "capabilityJti", "audit"}
 )
 
@@ -402,7 +404,7 @@ func parseHead(cm *corev1.ConfigMap) (guard.Head, error) {
 	if err != nil {
 		return guard.Head{}, fmt.Errorf("audit head: bad seq %q", cm.Data["seq"])
 	}
-	h := guard.Head{Seq: seq, Hash: cm.Data["hash"]}
+	h := guard.Head{Seq: seq, Hash: cm.Data["hash"], At: cm.Data["at"], Kid: cm.Data["kid"], Sig: cm.Data["sig"]}
 	if v := cm.Data["voids"]; v != "" {
 		if err := json.Unmarshal([]byte(v), &h.Voids); err != nil {
 			return guard.Head{}, fmt.Errorf("audit head: bad voids: %w", err)
@@ -462,9 +464,70 @@ func (k *Kube) AdvanceHead(ctx context.Context, fn func(guard.Head) (guard.Head,
 
 func headData(h guard.Head) map[string]string {
 	d := map[string]string{"seq": strconv.FormatInt(h.Seq, 10), "hash": h.Hash}
+	if h.Sig != "" {
+		d["at"], d["kid"], d["sig"] = h.At, h.Kid, h.Sig
+	}
 	if len(h.Voids) > 0 {
 		b, _ := json.Marshal(h.Voids)
 		d["voids"] = string(b)
 	}
 	return d
+}
+
+// RecordPolicy adds a policy version to the policies ConfigMap (created on first use). Replicas
+// starting together may race; the first record of a version wins.
+func (k *Kube) RecordPolicy(ctx context.Context, p guard.PolicyRecord) error {
+	cms := k.Core.ConfigMaps(k.Namespace)
+	b, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	key := p.Version + ".json"
+	for range maxAttempts {
+		cm, err := cms.Get(ctx, PolicyConfigMap, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err = cms.Create(ctx, &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: PolicyConfigMap, Labels: map[string]string{"app.kubernetes.io/name": "sentinel-guard"}},
+				Data:       map[string]string{key: string(b)}}, metav1.CreateOptions{})
+			if apierrors.IsAlreadyExists(err) {
+				continue
+			}
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		if _, ok := cm.Data[key]; ok {
+			return nil
+		}
+		if cm.Data == nil {
+			cm.Data = map[string]string{}
+		}
+		cm.Data[key] = string(b)
+		if _, err = cms.Update(ctx, cm, metav1.UpdateOptions{}); apierrors.IsConflict(err) {
+			continue
+		}
+		return err
+	}
+	return errors.New("policy versions: too much contention")
+}
+
+func (k *Kube) Policies(ctx context.Context) ([]guard.PolicyRecord, error) {
+	cm, err := k.Core.ConfigMaps(k.Namespace).Get(ctx, PolicyConfigMap, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]guard.PolicyRecord, 0, len(cm.Data))
+	for key, v := range cm.Data {
+		var p guard.PolicyRecord
+		if err := json.Unmarshal([]byte(v), &p); err != nil {
+			return nil, fmt.Errorf("policy versions: %s: %w", key, err)
+		}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LoadedAt < out[j].LoadedAt })
+	return out, nil
 }

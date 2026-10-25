@@ -6,10 +6,10 @@ Guard is the safety core of [Sentinel](../../README.md) (approval → single-use
 
 - **At the Kubernetes API.** An admission webhook sees agents' changes before they're stored, so an agent can't route around it. No agent code changes.
 - **Bound to the exact change.** Approving "scale `checkout` to 3" admits that, once. It does not admit "scale to 0", a second restart, or the same change after someone reverted it.
-- **Tamper-evident.** Every request, decision and execution is a signed link in a hash chain. `kubectl sentinel audit verify` checks it yourself, and also detects deleted records.
+- **Tamper-evident, and provable to others.** Every request, decision and execution is a signed link in a hash chain. `kubectl sentinel audit verify` checks it yourself, and also detects deleted records. `kubectl sentinel audit export` produces one evidence file that anyone can verify offline ([governance and compliance](../compliance/README.md)).
 - **Small.** One Go binary, an 11.5 MB image (compressed). It needs no database: its state lives in the Kubernetes API, so three replicas share it.
 
-> **Status: v2.0.0-alpha.2.** The design and the safety properties are tested on a real API server in CI (25 checks, below). Treat the API and the CRD (`v1alpha1`) as subject to change.
+> **Status: v2.0.0-alpha.2.** The design and the safety properties are tested on a real API server in CI (31 checks, below). Treat the API and the CRD (`v1alpha1`) as subject to change.
 
 ## Try it in one minute (Docker, no cluster)
 The same guard runs as a single process with an HTTP API: an agent asks before acting, a human approves, and the agent gets a single-use capability that the executor redeems.
@@ -162,7 +162,8 @@ Preconditions are checked by the guard against your telemetry. An agent's own ev
 | `GET /v1/actions/{id}` | the requesting agent | status; once approved, the single-use capability (issued once) |
 | `POST /v1/capabilities/spend` | executor | verify and consume a capability atomically: `200`, or `409` if already used |
 | `POST /v1/actions/{id}/approve` · `/deny` | the admin token (single-process mode) or a **delegate** | records `{approver, note}`; people in Kubernetes approve with `kubectl sentinel` |
-| `GET /v1/audit/verify` | approver | verify the audit chain |
+| `GET /v1/audit/verify` | the admin token, or an **auditor** (policy `auditors`) | verify the audit chain |
+| `GET /v1/audit/export` | the admin token, or an auditor | the evidence bundle: every request, the signed head, every policy version, the public keys |
 | `GET /.well-known/jwks.json` | anyone | the guard's public key (capabilities are ES256 JWTs) |
 
 In Kubernetes, agents authenticate with their ServiceAccount token (verified with a TokenReview); approvals are Kubernetes objects, so they follow your RBAC. A capability binds the request, action, target, the approved parameters (`change`) and approver, and expires with the approval.
@@ -173,6 +174,25 @@ In Kubernetes, agents authenticate with their ServiceAccount token (verified wit
 - the guard records Alice as the approver, via your app, so the trust is visible in the audit. Your app can never approve on behalf of the agent that asked.
 
 Sentinel's incident console works this way. With `api.plainHTTP: true` the guard also serves this API inside the cluster over plain HTTP (no webhooks on that port).
+
+## Evidence, policy versions and guardian alerts (Phase 14)
+- **Export and verify.** `kubectl sentinel audit export > evidence.json` writes the whole record with your own RBAC (the viewer role is enough). `kubectl sentinel audit verify --bundle evidence.json --jwks keys.json` checks it anywhere, without cluster access:
+  - every signature and link, and the signed chain head;
+  - that each request's outcome and approver match its signed events;
+  - that the rules each request names are in the file.
+  
+  Add `--previous last-month.json` to check that nothing recorded in an earlier, archived export was removed or changed since.
+- **Policy versions.** Each request names the SHA-256 of the effective policy it was evaluated under. The guard keeps every version, signed, in the `sentinel-guard-policies` ConfigMap.
+- **Self-verification.** Every replica verifies the whole chain every 5 minutes (`SENTINEL_GUARD_VERIFY_INTERVAL`) and exports the result as `sentinel_guard_audit_chain_ok`.
+- **Alerts.** `--set prometheusRule.enabled=true` (with the Prometheus Operator) installs rules for:
+  - a broken, unverified or rewound chain;
+  - an approval backlog;
+  - per-agent drift: bursts of blocked attempts, a rising share blocked or denied, people overriding an agent, an agent suddenly needing approval for what it used to do on policy.
+  
+  The rules are in [`alerts/guard-alerts.yaml`](../../deploy/helm/sentinel-guard/alerts/guard-alerts.yaml), unit-tested with `promtool`.
+- **Auditors.** List identities under `auditors` (chart values) to let them call `GET /v1/audit/export`, for example a CronJob that archives evidence monthly.
+
+What this maps to in the EU AI Act and the NIST AI RMF, and what stays yours: [docs/compliance](../compliance/README.md).
 
 ## How it works
 - **Classification.** The webhook turns an admission request into an action and a *fingerprint* of the exact change (`replicas=3`, the new images, a digest of the new template). The approval is bound to agent + action + target + fingerprint.
@@ -189,6 +209,8 @@ Sentinel's incident console works this way. With `api.plainHTTP: true` the guard
 | Prometheus down | preconditions `unknown`: `auto` actions need a human | unaffected |
 | A replica dies mid-write | the other replicas continue; an interrupted place in the chain is reported, never hidden | unaffected |
 
+**Stopping every agent at once:** `kubectl -n sentinel-system scale deploy/sentinel-guard --replicas=0`. Agents' changes are refused while the guard is down, and everyone else carries on. Scale it back up to resume.
+
 Emergency: a cluster admin can remove the `sentinel-guard` ValidatingWebhookConfiguration (break-glass, visible in the Kubernetes audit log).
 
 ## Measured
@@ -196,11 +218,11 @@ On a fresh kind cluster (1 node, laptop), 3 replicas, through the API server ([r
 
 | | p50 | p99 |
 |---|---|---|
-| A human's change (the guard is never called) | 2.3 ms | 4.9 ms |
-| An agent's change that is waiting for approval | 2.1 ms | 4.6 ms |
-| An agent's change after approval (admitted once) | 26.8 ms | 42.9 ms |
+| A human's change (the guard is never called) | 3.2 ms | 8.8 ms |
+| An agent's change that is waiting for approval | 2.4 ms | 6.0 ms |
+| An agent's change after approval (admitted once) | 24.7 ms | 40.8 ms |
 
-The end-to-end suite (`scripts/guard-e2e.sh`, run in CI) passes 25 checks against a real API server:
+The end-to-end suite (`scripts/guard-e2e.sh`, run in CI) passes 31 checks against a real API server:
 - agents wait while humans don't;
 - an approval admits exactly that change, once, including across the API server's retries;
 - a different change, a second restart, or the same change after a revert each need a new approval;
@@ -208,11 +230,11 @@ The end-to-end suite (`scripts/guard-e2e.sh`, run in CI) passes 25 checks agains
 - agents can't approve;
 - records can't be edited or deleted;
 - dry runs preview;
-- with the guard down only agents are stopped, and it is back within 1 s of scaling up;
-- the audit chain verifies.
+- with the guard down only agents are stopped, and it is back within 2 s of scaling up;
+- the audit chain verifies, the evidence export verifies offline, an edited export fails, and a later export extends an archived one.
 
 ## Limits (alpha)
-- Retention: `ActionRequest` objects are kept (they are the audit record); there is no compaction or export yet.
+- Retention: `ActionRequest` objects are kept (they are the audit record), about 2 KB per request. Export and archive them (`kubectl sentinel audit export`); there is no compaction yet.
 - The audit chain head is a single ConfigMap: every event is serialized through it. That's fine at human-approval rates, but it's not a high-volume event log.
 - One cluster per guard. API-mode agents in single-process mode keep state in memory only.
 - Only the operations in the table above are guarded by default. Add more with `webhook.extraRules` (they're classified as `update` or `delete`).

@@ -88,6 +88,7 @@
     <p class="lede">An agentic incident-response copilot that closes the loop: the alert opens the incident, an agent investigates and cites its evidence, a human approves, the fix runs exactly once, and recovery is verified.</p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/abdulmdev/sentinel-incident-copilot">View on GitHub</a>
+      <a class="btn" href="https://codespaces.new/abdulmdev/sentinel-incident-copilot?quickstart=1">Try it in Codespaces</a>
       <a class="btn" href="bench/index.html">SafeActionBench leaderboard</a>
       <a class="btn" href="blog/ai-agent-production-guardrails.html">Read the write-up</a>
       <a class="btn" href="handbook/Sentinel-Handbook.html">Engineering handbook</a>
@@ -106,11 +107,12 @@
       <p class="hook">No agent changes your cluster unless policy, or a human, approved that exact change, and then only once.</p>
       <p>Sentinel's safety core, extracted for coding agents with <code>kubectl</code>, CI and GitOps bots, and LangGraph or MCP agents. It needs no agent code changes, because it enforces at the Kubernetes API. Humans, CI and controllers are never sent to it, so a guard outage stops only agents.</p>
       <div class="stats">
-        <div class="stat"><b>42.9 ms</b><span>p99 for an approved agent change, admitted once (3 replicas, through the API server)</span></div>
-        <div class="stat"><b>4.6 ms</b><span>p99 for an agent change waiting for approval (a human's: 4.9 ms)</span></div>
-        <div class="stat"><b>25 / 25</b><span>end-to-end checks on a real API server, incl. its write retries and the guard taken down</span></div>
+        <div class="stat"><b>40.8 ms</b><span>p99 for an approved agent change, admitted once (3 replicas, through the API server)</span></div>
+        <div class="stat"><b>6.0 ms</b><span>p99 for an agent change waiting for approval (a human's: 8.8 ms)</span></div>
+        <div class="stat"><b>31 / 31</b><span>end-to-end checks on a real API server, incl. its write retries, the guard taken down and tampered evidence</span></div>
         <div class="stat"><b>11.5 MB</b><span>one Go binary, no database: state lives in the Kubernetes API</span></div>
       </div>
+      <p><b>Provable to others.</b> <code>kubectl sentinel audit export</code> writes one evidence file: every request, its signed events, the policy version it was decided under, the signed chain head. Anyone can verify it offline, and an edited copy fails, naming the record. Every replica re-verifies the chain itself, and tested alert rules flag drift in each agent's behaviour. <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/compliance/README.md">How this maps to the EU AI Act and the NIST AI RMF →</a></p>
       <p class="note"><code>helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.2 -n sentinel-system --create-namespace</code> · then <code>kubectl sentinel approve &lt;id&gt;</code> · <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md">Sentinel Guard docs →</a></p>
     </div>
   </section>
@@ -214,6 +216,8 @@
       <tr><td>7 · Close the loop</td><td>Alerts open incidents; capability-gated execution; verification; time to mitigate</td></tr>
       <tr><td>8 · Zero trust</td><td>ES256 + JWKS, OIDC, every hop authenticated, checkpoint RLS</td></tr>
       <tr><td>9 · Publish and measure</td><td>Full local-LLM benchmark; runbook preconditions take gemma4 from 11.6% to 0% harmful actions</td></tr>
+      <tr><td>10–13 · Sentinel Guard</td><td>The safety core for any agent: Kubernetes admission, SDKs and an MCP proxy, the copilot on it, SafeActionBench</td></tr>
+      <tr><td>14 · Governance</td><td>Signed evidence export verifiable offline, policy versions, guardian alerts on agent drift, EU AI Act / NIST AI RMF mapping, one-click Codespaces demo</td></tr>
     </table>
   </section>
 

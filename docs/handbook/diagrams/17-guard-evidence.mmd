@@ -1,0 +1,20 @@
+flowchart LR
+  subgraph guard["Sentinel Guard (every replica)"]
+    E["engine<br/>signs each event, the new head<br/>and each policy version"]
+    M["monitor<br/>re-verifies the whole chain every 5 min<br/>counts each agent's outcomes"]
+  end
+  subgraph state["Kubernetes API"]
+    AR["ActionRequests<br/>request + policyVersion + signed events"]
+    CM["ConfigMaps<br/>signed head · policy versions · public key"]
+  end
+  E --> AR
+  E --> CM
+  AR --> M
+  CM --> M
+  M -->|"chain_ok · outcomes · backlog · head_seq"| P["Prometheus<br/>guardian alerts: integrity,<br/>oversight, per-agent drift"]
+  AR --> X["kubectl sentinel audit export<br/>or GET /v1/audit/export"]
+  CM --> X
+  X --> B[("evidence.json<br/>no signature of its own:<br/>every part is signed")]
+  B --> V["offline verifier<br/>kubectl sentinel audit verify<br/>signatures · links · digests ·<br/>outcomes vs events · policies · summary"]
+  A[("last month's archive")] -->|"--previous: nothing removed or changed"| V
+  K(["pinned public key --jwks"]) --> V

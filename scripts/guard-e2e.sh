@@ -7,7 +7,8 @@
 #
 # Proves, against the real API server: agents wait for approval while humans don't; an approval
 # admits exactly that change, once; agents can't approve; records can't be edited or deleted;
-# server-side dry runs preview; with the guard down only agents are stopped; the audit verifies.
+# server-side dry runs preview; with the guard down only agents are stopped; the audit verifies;
+# the evidence export verifies offline and shows edits; every replica verifies the chain itself.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -113,7 +114,37 @@ if grep -q "cannot be deleted" <<<"$out"; then ok "even cluster-admin can't dele
 out=$(kubectl -n $NS patch actionrequest "$ID" --type merge -p '{"spec":{"target":{"name":"payments"}}}' 2>&1) && die "a request was edited"
 if grep -q "cannot be edited" <<<"$out"; then ok "what was requested can't be edited"; else die "what was requested can't be edited"; fi
 
-if kubectl sentinel audit verify | tee "$WORK/verify.txt" | grep -q "Audit chain OK"; then ok "$(cat "$WORK/verify.txt")"; else die "$(cat "$WORK/verify.txt")"; fi
+if kubectl sentinel audit verify | tee "$WORK/verify.txt" | grep -q "Audit chain OK"; then ok "$(head -1 "$WORK/verify.txt")"; else die "$(cat "$WORK/verify.txt")"; fi
+
+echo "Evidence"
+PV=$(kubectl -n $NS get actionrequest "$ID" -o jsonpath='{.spec.policyVersion}')
+[ ${#PV} = 64 ] && kubectl -n $NS get configmap sentinel-guard-policies -o jsonpath='{.data}' | grep -q "$PV" \
+  || die "the request should name its policy version, kept in sentinel-guard-policies (got '$PV')"
+ok "each request names the policy version it was decided under, and the guard keeps that policy (${PV:0:12})"
+[ -n "$(kubectl -n $NS get configmap sentinel-guard-audit-head -o jsonpath='{.data.sig}')" ] || die "the chain head is not signed"
+ok "the chain head is a signed checkpoint"
+kubectl sentinel audit export > "$WORK/evidence.json" || die "audit export failed"
+cp "$WORK/evidence.json" "$WORK/archived.json"
+kubectl -n $NS get configmap sentinel-guard-jwks -o jsonpath='{.data.jwks\.json}' > "$WORK/jwks.json"
+if KUBECONFIG=/nonexistent kubectl-sentinel audit verify --bundle "$WORK/evidence.json" --jwks "$WORK/jwks.json" > "$WORK/offline.txt"; then
+  ok "the exported evidence verifies offline, against the guard's published key: $(sed -n 2p "$WORK/offline.txt")"
+else die "offline verification: $(cat "$WORK/offline.txt")"; fi
+python3 - "$WORK/evidence.json" "$ID" <<'PY'
+import json, sys
+ev = json.load(open(sys.argv[1]))
+for r in ev["requests"]:
+    if r["id"] == sys.argv[2]:
+        r["decidedBy"] = "someone-else"
+json.dump(ev, open(sys.argv[1], "w"))
+PY
+out=$(kubectl-sentinel audit verify --bundle "$WORK/evidence.json" --jwks "$WORK/jwks.json" 2>&1) && die "an edited bundle verified"
+if grep -q "signed record says" <<<"$out"; then ok "an edited bundle fails verification, naming the record"; else die "edited bundle: $out"; fi
+METRICS=$(for pod in $(kubectl -n $NS get pod -l app.kubernetes.io/name=sentinel-guard -o jsonpath='{.items[*].metadata.name}'); do
+  kubectl -n $NS get --raw "/api/v1/namespaces/$NS/pods/$pod:9090/proxy/metrics"; done)
+[ "$(grep -c '^sentinel_guard_audit_chain_ok 1' <<<"$METRICS")" = 3 ] \
+  && grep -q 'sentinel_guard_agent_outcomes_total{action="scale",agent="system:serviceaccount:agents:fixer",outcome="executed"}' <<<"$METRICS" \
+  || die "guardian metrics missing"
+ok "guardian metrics: all 3 replicas verified the chain themselves; per-agent outcomes counted"
 
 if [ "${LOAD:-0}" = 1 ]; then
   echo "Latency (through the API server; see evals/guard/latency.json)"
@@ -148,5 +179,9 @@ done
 grep -q "needs human approval" <<<"$out" || die "the guard did not come back: $out"
 ok "guard back: answering again $(( $(date +%s) - T0 ))s after scaling up from zero"
 if kubectl sentinel audit verify | grep -q "Audit chain OK"; then ok "audit chain intact after the outage"; else die "audit chain intact after the outage"; fi
+kubectl sentinel audit export > "$WORK/later.json"
+if kubectl-sentinel audit verify --bundle "$WORK/later.json" --jwks "$WORK/jwks.json" --previous "$WORK/archived.json" | grep -q "nothing recorded there was removed"; then
+  ok "a later export extends the archived one: nothing removed or changed"
+else die "a later export should extend the archived one"; fi
 
 echo "All $PASS checks passed."

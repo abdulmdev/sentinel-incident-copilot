@@ -67,6 +67,7 @@ func main() {
 	mutating := flag.String("mutating-webhook", env("SENTINEL_GUARD_MUTATING_WEBHOOK", "sentinel-guard"), "MutatingWebhookConfiguration to keep the CA bundle on")
 	issuer := flag.String("issuer", env("SENTINEL_GUARD_ISSUER", "sentinel-guard"), "issuer of capabilities")
 	apiAddr := flag.String("api-addr", env("SENTINEL_GUARD_API_ADDR", ""), "kubernetes mode: also serve the action API (no webhooks) over plain HTTP here, for in-cluster clients")
+	verifyEvery := flag.Duration("verify-interval", envDuration("SENTINEL_GUARD_VERIFY_INTERVAL", 5*time.Minute), "how often each replica verifies the whole audit chain (sentinel_guard_audit_chain_ok)")
 	showVersion := flag.Bool("version", false, "print the version")
 	flag.Parse()
 	if *showVersion {
@@ -74,13 +75,20 @@ func main() {
 		return
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if err := run(log, *mode, *policyPath, *addr, *apiAddr, *metricsAddr, *namespace, *service, *validating, *mutating, *issuer); err != nil {
+	if err := run(log, *mode, *policyPath, *addr, *apiAddr, *metricsAddr, *namespace, *service, *validating, *mutating, *issuer, *verifyEvery); err != nil {
 		log.Error("sentinel-guard stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, service, validating, mutating, issuer string) error {
+func envDuration(key string, def time.Duration) time.Duration {
+	if d, err := time.ParseDuration(os.Getenv(key)); err == nil && d > 0 {
+		return d
+	}
+	return def
+}
+
+func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, service, validating, mutating, issuer string, verifyEvery time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -102,7 +110,7 @@ func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, ser
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
-	srv := &server.Server{Metrics: server.NewMetrics(reg), Log: log}
+	srv := &server.Server{Metrics: server.NewMetrics(reg), Log: log, Version: version}
 	var ready atomic.Bool
 	srv.Ready = ready.Load
 
@@ -221,6 +229,10 @@ func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, ser
 	}
 	srv.Engine = guard.NewEngine(st, signer, prober, policy)
 	srv.Hook()
+	// Keep the policy version in force, signed, so every decision can be traced to its rules.
+	if err := srv.Engine.RecordPolicy(ctx); err != nil {
+		return err
+	}
 
 	if mode == "kubernetes" {
 		if err := kube.PublishJWKS(ctx, core, ns, signer.JWKS()); err != nil {
@@ -275,8 +287,10 @@ func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, ser
 			}
 		}
 	})
+	go srv.Monitor(ctx, 15*time.Second, verifyEvery)
 	ready.Store(true)
 	log.Info("sentinel-guard started", "version", version, "mode", mode, "addr", addr, "kid", signer.KeyID(),
+		"policy", srv.Engine.PolicyVersion()[:12],
 		"agentGroups", policy.Agents.Groups, "agentUsers", policy.Agents.Users)
 
 	select {
