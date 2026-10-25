@@ -30,7 +30,7 @@
 Sentinel's safety core now ships on its own. **No agent changes your cluster unless policy, or a human, approved that exact change, and then only once.** It works with coding agents running `kubectl`, CI and GitOps bots, and LangGraph or MCP agents, with no code changes, because it enforces at the Kubernetes API. Humans, CI and controllers are never sent to it, so if the guard is down they are unaffected and only agents wait.
 
 ```bash
-helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.2 -n sentinel-system --create-namespace
+helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.3 -n sentinel-system --create-namespace
 ```
 
 ```

@@ -1,6 +1,6 @@
 dependencies:
 - name: sentinel-guard
   repository: file://../sentinel-guard
-  version: 2.0.0-alpha.2
-digest: sha256:a724f8302857ac497338308279b20d62dc27983e20a82957597bc50e3965be3a
-generated: "2026-10-24T14:50:28.56221+05:30"
+  version: 2.0.0-alpha.3
+digest: sha256:edf929ea37d6397d4ae871ff028f41d0ad8630affff5bfd8c7946615f0c70548
+generated: "2026-10-25T15:41:12.301351+05:30"

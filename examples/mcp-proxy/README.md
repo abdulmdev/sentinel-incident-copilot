@@ -6,7 +6,7 @@
 
    ```bash
    docker run --rm -p 8080:8080 -e SENTINEL_GUARD_AGENT_TOKENS=claude=agent-secret \
-     -e SENTINEL_GUARD_ADMIN_TOKEN=approver-secret ghcr.io/abdulmdev/sentinel-guard:2.0.0-alpha.2
+     -e SENTINEL_GUARD_ADMIN_TOKEN=approver-secret ghcr.io/abdulmdev/sentinel-guard:2.0.0-alpha.3
    ```
 
 2. Install the SDK with the proxy:
