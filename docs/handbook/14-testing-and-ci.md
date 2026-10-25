@@ -1,6 +1,6 @@
 # 14 Testing and CI
 
-**330 automated tests** (measured 2026-10-25, at v2.0.0; 329 after Phase 17, 324 after Phase 16, 307 after Phase 15, 306 after Phase 14, 290 after Phase 13, 277 after Phase 12, 252 after Phase 11, 244 after Phase 10, 212 before it):
+**331 automated tests** (measured 2026-10-26, at v2.0.0; 329 after Phase 17, 324 after Phase 16, 307 after Phase 15, 306 after Phase 14, 290 after Phase 13, 277 after Phase 12, 252 after Phase 11, 244 after Phase 10, 212 before it):
 
 | Suite | Tests |
 |---|---|
@@ -8,7 +8,7 @@
 | Python SDK + MCP proxy | 19 (against the real guard binary) |
 | TypeScript SDK | 6 (against the real guard binary) |
 | gateway | 96 (69 unit/slice + 27 integration) |
-| sentinel-guard (Go) | 71 (55 test functions + 16 subtests), run with the race detector |
+| sentinel-guard (Go) | 72 (56 test functions + 16 subtests), run with the race detector |
 | agent | 72 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
 | mcp-remediation | 17 |
 | eval scorer + runner | 14 |
@@ -108,7 +108,7 @@ uv run --project agent-service python evals/rca/run.py --check
 | `test_auth.py` (8) | Gateway → agent: no token → 401; a token for the tenant → accepted; **another tenant's token → 403 in path and body**; tool-token audience, forged key, expired, and HS256 shared-secret tokens → 401; health and metrics open |
 | `test_postgres_checkpointer.py` (3) | Durability across processes (the approval lives in the guard, so it survives the restart too, and the incident resolves); **checkpoint RLS**: a request bound to another tenant reads nothing and can't write (`InsufficientPrivilege`), an unbound request reads nothing; tables FORCE RLS even for their owner |
 
-### sentinel-guard (71; `cd guard && go test -race ./...`)
+### sentinel-guard (72; `cd guard && go test -race ./...`)
 - **Engine** (`internal/guard/engine_test.go`):
   - an approval admits exactly once, a retry while pending reuses the request, a replay opens a new one;
   - the approval is bound to the exact change and target;
@@ -160,6 +160,7 @@ uv run --project agent-service python evals/rca/run.py --check
   - notifications: two notices (asked, then one of two approved) with the right text, structured fields and inbox link; a 503 retried; `sent` counted;
   - **self-verification re-reads before raising the alarm** (v2.0.0): with a store whose head reads one step ahead once (a write in flight), `audit_chain_ok` stays 1. The test fails without the re-read;
   - **the overview** (Phase 17): only approvers, the admin token and auditors may read it; it counts what waits, unspent approvals, outcomes overall and per agent; the chain's health appears after the first self-verification.
+- **A caller that hangs up mid-write leaves no gap** (`engine_test.go`, v2.0.0): a store that fails writes on a cancelled context, as the Kubernetes client does, cancels the caller right after the chain place is claimed. The request is still written whole and the chain verifies. Without the detached context it fails with "context canceled".
 - **A fresh read before "pending"** (`engine_test.go`, Phase 17): with a store whose cached lookup still shows a request undecided while another replica has approved it, the next attempt is admitted at once. The test fails with the fresh read disabled.
 - **Benchmarks** (not counted as tests): `BenchmarkVerifyEvidence` (1,000 requests, 3,000 events: about 0.18 s; about 2.1 KB per request) and `BenchmarkSignHash` (about 26 µs), Apple M1 Pro.
 

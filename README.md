@@ -132,7 +132,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 | **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **330** automated tests (incl. 71 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 33 Guard checks on a real API server and an 8-check upgrade test from the last alpha, promtool-tested alert rules, an asserted walkthrough and a checked `docker compose` quickstart; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **331** automated tests (incl. 72 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 33 Guard checks on a real API server and an 8-check upgrade test from the last alpha, promtool-tested alert rules, an asserted walkthrough and a checked `docker compose` quickstart; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 

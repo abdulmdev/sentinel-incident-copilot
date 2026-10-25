@@ -802,6 +802,16 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
   - The same window could set `sentinel_guard_audit_chain_ok` to 0 for a whole verify interval, and fire a false `SentinelGuardAuditChainBroken`.
   - The fix: `kubectl sentinel audit verify` and the self-verification re-read once, 3 s later, before reporting. A write in flight completes within the webhook timeout; real tampering is still there (tested both ways).
   - The e2e now prints the verify output and the guard's logs on any failure; the failed run had shown neither.
+- **A data-integrity bug, present since Phase 10, found by chasing two intermittent failures:**
+  - **The failures:** the e2e's "chain intact after the outage" check, and the upgrade test's last verification, each failed once.
+  - **The cause:** a guard write is several steps: claim the event's place in the chain, write the request, write its status. They ran on the incoming request's context. When the API server gives up on a slow webhook call (5 s, as after a cold start), that context is cancelled mid-sequence.
+  - **The damage:** a claimed place could be left with no event, a permanent gap. The signed void meant to cover a failed write used the same cancelled context. And a request could exist without its status, so with no audit event.
+  - **The fix:** the multi-write steps (`create`, `transition`, `void`) run on a context detached from the caller, with their own 15 s timeout. If a request's status write fails anyway, the half-made object is deleted, so the void accounts for its place and a retry creates it whole.
+  - **The test:** a store that cancels the caller right after the place is claimed shows the write completing and the chain verifying. Without the fix it fails.
+- **Found by the upgrade job's new diagnostics: approvals right after a rolling restart could time out.**
+  - The API server's call to the approval webhook hung for its full 5 s: the Service still routed calls, for a moment, to a pod that had just stopped.
+  - The fix: guard pods get a `preStop` pause of 5 s and keep answering while they're taken out of the endpoints.
+  - Alpha pods don't have the pause, so upgrades from an alpha wait for the old pods to finish terminating before approving (the upgrade notes and the test both do).
 - **A test race fixed:** `TestNotifications` read the `sent` counter before the notifier had counted its second delivery. The sink records a notice before its answer reaches the notifier. It now waits for the count, and passed 20 runs in a row under the race detector.
 
 ---

@@ -85,6 +85,11 @@ spec:
             httpGet: {path: /healthz, port: https, scheme: HTTPS}
             periodSeconds: 10
             failureThreshold: 6
+          lifecycle:
+            # Keep answering while this pod is removed from the Service's endpoints: the API server
+            # calls the webhooks through it, and a call sent to a pod that already stopped would hang
+            # until the webhook timeout (seen right after a rolling restart).
+            preStop: {sleep: {seconds: 5}}
           resources: {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false

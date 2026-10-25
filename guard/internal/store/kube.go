@@ -225,10 +225,15 @@ func (k *Kube) Create(ctx context.Context, r *guard.Request) error {
 	// The status subresource ignores status on create: write it separately.
 	created.Object["status"] = status
 	updated, err := k.res().UpdateStatus(ctx, created, metav1.UpdateOptions{})
-	if err == nil {
-		k.remember(updated)
+	if err != nil {
+		// Never leave a request without its signed event: remove the half-made object, so the engine's
+		// signed void accounts for the claimed place and a retry can create it whole.
+		uid := created.GetUID()
+		_ = k.res().Delete(ctx, r.ID, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+		return wrap(err, "status of "+r.ID)
 	}
-	return wrap(err, "status of "+r.ID)
+	k.remember(updated)
+	return nil
 }
 
 func (k *Kube) Get(ctx context.Context, id string) (*guard.Request, error) {

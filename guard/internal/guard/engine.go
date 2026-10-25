@@ -282,7 +282,17 @@ func (e *Engine) recent(ctx context.Context, key string, phase Phase) (*Request,
 	return nil, nil
 }
 
+// detach lets a multi-write step finish when its caller goes away. The API server stops waiting for
+// a webhook after its timeout (5 s), cancelling the request's context; a step cut off between
+// claiming an event's place in the chain and writing it would leave a permanent gap (and the signed
+// void that covers a failed write needs a live context too).
+func detach(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+}
+
 func (e *Engine) create(ctx context.Context, p Proposal, ap ActionPolicy, phase Phase, reasons []string, checks []Check) (*Request, error) {
+	ctx, cancel := detach(ctx)
+	defer cancel()
 	// No request may name a policy version that isn't kept (a no-op once recorded).
 	if err := e.RecordPolicy(ctx); err != nil {
 		return nil, err
@@ -356,6 +366,8 @@ func (e *Engine) nextID(ctx context.Context, key string) (string, error) {
 // refuses (another replica got there in the meantime) or the write fails, the claimed place is
 // recorded as a signed void, so the chain stays complete and a deleted record still shows as a gap.
 func (e *Engine) transition(ctx context.Context, r *Request, typ, actor, detail string, fn func(*Request) error) (*Request, error) {
+	ctx, cancel := detach(ctx)
+	defer cancel()
 	// Check against the current state before claiming a place in the chain, so a refused attempt
 	// (a replayed capability, a request already decided) costs no write and leaves no void.
 	cur, err := e.Store.Get(ctx, r.ID)
@@ -388,6 +400,8 @@ func (e *Engine) transition(ctx context.Context, r *Request, typ, actor, detail 
 }
 
 func (e *Engine) void(ctx context.Context, ev Event) {
+	ctx, cancel := detach(ctx)
+	defer cancel()
 	v := Void{Seq: ev.Seq, Hash: ev.Hash, Kid: e.Signer.KeyID()}
 	sig, err := e.Signer.SignHash(v.SigningHash())
 	if err != nil {

@@ -52,7 +52,7 @@ kubectl apply -f https://raw.githubusercontent.com/abdulmdev/sentinel-incident-c
 helm upgrade sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0 -n sentinel-system
 ```
 
-`helm upgrade` never updates CRDs. A 2.0.0 guard on the old CRD stops, and its log says exactly what to apply. Records from the alpha releases are read through v1 and keep verifying, and requests pending across the upgrade can still be approved. CI tests this path from 2.0.0-alpha.3 on a real API server.
+`helm upgrade` never updates CRDs. A 2.0.0 guard on the old CRD stops, and its log says exactly what to apply. Then `kubectl -n sentinel-system rollout restart deploy/sentinel-guard`, and wait until the alpha's pods have finished terminating before approving anything. Those pods lack 2.0.0's `preStop` pause, so a webhook call routed to one that has stopped would time out. Records from the alpha releases are read through v1 and keep verifying, and requests pending across the upgrade can still be approved. CI tests this path from 2.0.0-alpha.3 on a real API server.
 
 **Measured**
 - **On a real API server:** 33/33 end-to-end checks, and the upgrade test.
@@ -61,6 +61,6 @@ helm upgrade sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --vers
   - an agent change waiting for approval: 7.5 ms;
   - a human's change: 6.1 ms.
 - **The `docker compose` quickstart:** 29/29 checks in CI.
-- **330 automated tests.**
+- **331 automated tests.**
 
 Docs: [docs/guard/README.md](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md) · design: [handbook chapter 17](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/handbook/17-lld-sentinel-guard.md) · decisions: [ADR-0010](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/adr/0010-sentinel-guard.md) to [ADR-0018](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/adr/0018-a-stable-api-for-v2.md)

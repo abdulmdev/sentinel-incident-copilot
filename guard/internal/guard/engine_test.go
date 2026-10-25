@@ -481,3 +481,56 @@ func TestAnApprovalMadeThroughAnotherReplicaIsSeenAtOnce(t *testing.T) {
 		t.Fatalf("the approval must count at once: %+v", got.Request)
 	}
 }
+
+// hangUpStore behaves like the Kubernetes client (a cancelled context fails a write) and cancels the
+// caller's context right after the first chain place is claimed: the API server giving up on a
+// webhook call that is mid-way through its writes.
+type hangUpStore struct {
+	*store.Memory
+	hangUp context.CancelFunc
+	once   sync.Once
+}
+
+func (s *hangUpStore) AdvanceHead(ctx context.Context, fn func(guard.Head) (guard.Head, error)) (guard.Head, error) {
+	if err := ctx.Err(); err != nil {
+		return guard.Head{}, err
+	}
+	h, err := s.Memory.AdvanceHead(ctx, fn)
+	s.once.Do(s.hangUp)
+	return h, err
+}
+
+func (s *hangUpStore) Create(ctx context.Context, r *guard.Request) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.Memory.Create(ctx, r)
+}
+
+func (s *hangUpStore) Update(ctx context.Context, id string, fn func(*guard.Request) error) (*guard.Request, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.Memory.Update(ctx, id, fn)
+}
+
+func TestACallerThatHangsUpMidWriteLeavesNoGap(t *testing.T) {
+	_, mem, _ := defaultEngine(t)
+	p, _ := guard.ParsePolicy(policies.Default)
+	key, _ := guard.GenerateKeyPEM()
+	signer, _ := guard.NewSigner(key, "test")
+	ctx, cancel := context.WithCancel(context.Background())
+	e := guard.NewEngine(&hangUpStore{Memory: mem, hangUp: cancel}, signer, nil, p)
+
+	out, err := e.Evaluate(ctx, scaleTo("3"))
+	if err != nil || out.Verdict != guard.VerdictPending {
+		t.Fatalf("the write must complete although the caller went away: %v %+v", err, out)
+	}
+	ev, err := e.Evidence(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep := guard.VerifyEvidence(roundTrip(t, ev), nil); !rep.OK {
+		t.Fatalf("a caller hanging up must not break the chain: %v", rep.Problems)
+	}
+}

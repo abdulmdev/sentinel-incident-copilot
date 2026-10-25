@@ -310,7 +310,7 @@ Flags without a variable: `-version`, and `-healthcheck` (Phase 15): probe `http
 | `image.repository`, `image.tag` | `ghcr.io/abdulmdev/sentinel-guard`, the chart's appVersion | |
 
 ### 8.3 Operations
-- **Upgrade from a 2.0.0 alpha:** `kubectl apply -f deploy/helm/sentinel-guard/crds/actionrequests.sentinel.dev.yaml`, then `helm upgrade`. Helm never updates CRDs; a guard started on the old CRD stops with that instruction in its log. The CRD serves `v1` (stored) and `v1alpha1` (deprecated, same schema), so records from the alphas read and verify through either. `scripts/guard-upgrade-e2e.sh` (in CI) runs this from the published 2.0.0-alpha.3.
+- **Upgrade from a 2.0.0 alpha:** `kubectl apply -f deploy/helm/sentinel-guard/crds/actionrequests.sentinel.dev.yaml`, then `helm upgrade`. Wait until the alpha's pods have finished terminating before approving: they lack the `preStop` pause (5 s) that 2.0.0 pods have, so a webhook call routed to one that has stopped times out. Helm never updates CRDs; a guard started on the old CRD stops with that instruction in its log. The CRD serves `v1` (stored) and `v1alpha1` (deprecated, same schema), so records from the alphas read and verify through either. `scripts/guard-upgrade-e2e.sh` (in CI) runs this from the published 2.0.0-alpha.3.
 - **Approve:** `kubectl sentinel approve <id> [-m note]`, or `kubectl -n sentinel-system patch actionrequest <id> --type merge -p '{"spec":{"decision":"approve"}}'`.
 - **Verify the audit trail:** `kubectl sentinel audit verify` (needs read access to ActionRequests and the three ConfigMaps; exit code 2 on any problem).
 - **Export and archive evidence (Phase 14):**

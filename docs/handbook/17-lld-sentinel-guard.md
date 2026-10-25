@@ -353,6 +353,8 @@ A **details view** (a `<dialog>`) opens from any card, activity line or history 
 
 ## 15. A stable API (v2.0.0)
 - **The CRD serves `sentinel.dev/v1`** (stored) and `v1alpha1` (deprecated). Both versions have the same schema, so the API server serves either without a conversion webhook. The store, the plugin and the guard's own objects use `v1`.
+- **Rolling restarts:** guard pods have a `preStop` pause of 5 s, so they keep answering webhook calls while they're removed from the Service. Without it, a call routed to a pod that had just stopped hung until the 5 s webhook timeout (seen in CI right after a restart).
+- **Writes outlive their caller:** a guard write claims its chain place, then writes the request and its status. These steps run on a context detached from the caller, with a 15 s timeout, so an API server that stops waiting for a webhook can't leave a gap. If a status write still fails, the half-made object is deleted and the signed void covers its place.
 - **Verifying while the guard writes:** an event's place in the chain is claimed (the head advances) before its request is written. So a verification that reads in between can see the head a step ahead of the newest event. `kubectl sentinel audit verify` and the self-verification re-read once, 3 s later, before reporting a problem (v2.0.0). A write in flight finishes within the webhook timeout (5 s); tampering doesn't go away.
 
 - **A startup check** (`cmd/sentinel-guard`): in Kubernetes mode the guard asks discovery whether `sentinel.dev/v1` is served. If not, it exits with the fix: apply the chart's CRD file, because `helm upgrade` never updates CRDs.

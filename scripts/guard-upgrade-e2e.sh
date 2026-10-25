@@ -77,6 +77,12 @@ echo "Applying the CRD, as the upgrade notes say"
 kubectl apply -f deploy/helm/sentinel-guard/crds/actionrequests.sentinel.dev.yaml >/dev/null
 kubectl -n $NS rollout restart deploy/sentinel-guard >/dev/null
 kubectl -n $NS rollout status deploy/sentinel-guard --timeout 3m >/dev/null || die "the guard did not become ready after the CRD"
+# The alpha's pods have no preStop pause: until they're gone, the Service may still send a webhook
+# call to one that has stopped answering. Wait for them, as the upgrade notes say.
+for _ in $(seq 1 90); do
+  [ -z "$(kubectl -n $NS get pods -l app.kubernetes.io/name=sentinel-guard -o jsonpath='{.items[?(@.metadata.deletionTimestamp)].metadata.name}')" ] && break
+  sleep 1
+done
 served=$(kubectl get crd actionrequests.sentinel.dev -o jsonpath='{range .spec.versions[*]}{.name}={.storage} {end}')
 [ "$served" = "v1=true v1alpha1=false " ] || die "CRD versions: $served"
 ok "ready on the v1 API (v1 stored; v1alpha1 still served, deprecated)"
@@ -95,7 +101,8 @@ grep -qE "Approved $WAITING|Recorded your decision on $WAITING" <<<"$out" || die
 agent -n shop scale deploy/web --replicas=4 >/dev/null 2>&1 || die "the request approved after the upgrade was not admitted"
 out=$(agent -n shop scale deploy/web --replicas=3 2>&1) && die "a different change rode on the approval"
 ok "a request left pending across the upgrade is approved and admitted once"
-kubectl sentinel audit verify | grep -q "Audit chain OK" || die "the chain should still verify after new events"
+kubectl sentinel audit verify > "$WORK/verify2.txt" 2>&1 || true
+grep -q "Audit chain OK" "$WORK/verify2.txt" || die "the chain should still verify after new events: $(cat "$WORK/verify2.txt")"
 ok "the chain verifies with events from both versions"
 
 echo "All $PASSED checks passed."
