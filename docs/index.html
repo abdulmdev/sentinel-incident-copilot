@@ -102,7 +102,7 @@
   </header>
 
   <section>
-    <h2>🛡️ New in v2 (alpha): Sentinel Guard, envelope protection for any AI agent</h2>
+    <h2>🛡️ New in v2: Sentinel Guard, envelope protection for any AI agent</h2>
     <div class="cockpit">
       <p class="hook">No agent changes your cluster unless policy, or a human, approved that exact change, and then only once.</p>
       <p>Sentinel's safety core, extracted for coding agents with <code>kubectl</code>, CI and GitOps bots, and LangGraph or MCP agents. It needs no agent code changes, because it enforces at the Kubernetes API. Humans, CI and controllers are never sent to it, so a guard outage stops only agents.</p>
@@ -114,7 +114,7 @@
       </div>
       <p><b>Provable to others.</b> <code>kubectl sentinel audit export</code> writes one evidence file: every request, its signed events, the policy version it was decided under, the signed chain head. Anyone can verify it offline, and an edited copy fails, naming the record. Every replica re-verifies the chain itself, and tested alert rules flag drift in each agent's behaviour. <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/compliance/README.md">How this maps to the EU AI Act and the NIST AI RMF →</a></p>
       <p><b>Try it in one command.</b> From a clone, <code>docker compose up</code> starts the guard and a support-desk agent working behind it. Open <code>localhost:8080</code> as Alice (token <code>alice-demo</code>): every refund waits for you in the approvals inbox, closing an account needs Alice <i>and</i> Bob, receipts go out on policy, and erasures are never allowed. <code>--profile monitoring</code> adds Prometheus with the drift alerts and a Grafana dashboard. <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/examples/quickstart/README.md">Quickstart →</a></p>
-      <p class="note"><code>helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.3 -n sentinel-system --create-namespace</code> · then <code>kubectl sentinel approve &lt;id&gt;</code> · <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md">Sentinel Guard docs →</a></p>
+      <p class="note"><code>helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0 -n sentinel-system --create-namespace</code> · then <code>kubectl sentinel approve &lt;id&gt;</code> · <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md">Sentinel Guard docs →</a></p>
     </div>
   </section>
   <section>
@@ -220,8 +220,8 @@
       <tr><td>10–13 · Sentinel Guard</td><td>The safety core for any agent: Kubernetes admission, SDKs and an MCP proxy, the copilot on it, SafeActionBench</td></tr>
       <tr><td>14 · Governance</td><td>Signed evidence export verifiable offline, policy versions, guardian alerts on agent drift, EU AI Act / NIST AI RMF mapping, one-click Codespaces demo</td></tr>
       <tr><td>15 · Try it, ship it</td><td><code>docker compose up</code> with a live agent, an approvals inbox in the guard, a Grafana dashboard for the guard, signed charts and SDK packages on every release</td></tr>
-      <tr><td>16 · Two people</td><td>Two-person approvals for the riskiest actions, approvers verified by OIDC at the guard, notifications to Slack; v2.0.0-alpha.3 released</td></tr>
-      <tr><td>17 · The whole picture</td><td>An Overview of every agent's actions and a details view for every request, with its signed audit trail; incidents can no longer get stuck</td></tr>
+      <tr><td>16 · Two people</td><td>Two-person approvals for the riskiest actions, approvers verified by OIDC at the guard, notifications to Slack; v2.0.0 released</td></tr>
+      <tr><td>17 · The whole picture</td><td>An Overview of every agent's actions and a details view for every request, with its signed audit trail; incidents can no longer get stuck; released as v2.0.0, a stable API with upgrades tested</td></tr>
     </table>
   </section>
 

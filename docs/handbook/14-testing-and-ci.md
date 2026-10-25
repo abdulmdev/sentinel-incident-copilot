@@ -24,6 +24,7 @@ Plus:
 - k6 load thresholds;
 - a **scripted live closed-loop scenario** (section 4);
 - **Sentinel Guard end to end** on a real API server: 33 checks, a load run and the guard taken down (section 4A);
+- **the upgrade test** (`scripts/guard-upgrade-e2e.sh`): 8 checks upgrading from the published 2.0.0-alpha.3 on a real API server (v2.0.0; section 4C);
 - **the guard walkthrough** (`scripts/guard-demo.sh`, what Codespaces runs): 13 assertions across 11 steps, against a real guard (Phase 14);
 - **the docker compose quickstart** (`examples/quickstart/check.py`): 29 checks against the running stack, including two-person approvals, notifications, the overview and the monitoring profile (Phases 15 to 17; section 4B).
 
@@ -229,6 +230,7 @@ Each metric's definition, including the edge cases: wrong escalation isn't harmf
 | `quickstart` | `TICKET_EVERY=3 docker compose --profile monitoring up -d --build --wait` at the repository root, then `examples/quickstart/check.py --monitoring` (29 checks, section 4B); logs on failure; always `down -v` (Phase 15) | The one-command quickstart works |
 | `guard` | `gofmt` check, `go vet`, `go test -race ./...`, both binaries build (`deploy-config` also lints the guard chart and validates it with kubeconform; the CRD itself is validated by the real API server in `guard-e2e`) | Tests |
 | `guard-e2e` (needs guard, deploy-config) | `scripts/guard-e2e.sh` with `LOAD=1 LOAD_N=100` on a fresh kind cluster (section 4A) | End to end on a real API server |
+| `guard-upgrade` (needs guard, deploy-config) | `scripts/guard-upgrade-e2e.sh`: the published 2.0.0-alpha.3 from GHCR, then this checkout's chart and image (section 4C; v2.0.0) | Upgrades keep working and keep the record |
 | `kind-e2e` (needs the above) | kind cluster; `scripts/kind-up.sh`; seed knowledge; inject a fault; open an incident → expect `AWAITING_APPROVAL`; **approve → expect `RESOLVED`** (capability → remediation adapter → verification, in-cluster); **assert the console pod can't reach the agent or the remediation adapter** | End to end + NetworkPolicy |
 | `images` (main only; needs kind-e2e, eval-gate, guard-e2e) | Build jars + fetch the model; multi-arch (amd64/arm64) buildx; push `ghcr.io/<owner>/sentinel-<name>:<sha>` for 8 images (incl. `sentinel-guard`); GHA cache | — |
 | `release-guard.yml` (on a `v2.*` tag) | Tests; signed multi-arch image with SBOM + provenance; OCI chart, signed (Phase 15); `install.yaml`; plugin ×5 platforms; krew manifest; Python wheel + sdist and npm tarball (Phase 15); GitHub release. Opt-in jobs `pypi` and `npm` (trusted publishing) and the Artifact Hub metadata step run only when their repository variables are set | — |
@@ -336,6 +338,20 @@ Runs against `docker compose --profile monitoring up` at the repository root, wi
    - Grafana serves the `sentinel-guard` dashboard.
 
 Notices link to `/inbox/#<request id>` (Phase 17). Last run: 29/29, 2026-10-25 (Phase 17).
+
+## 4C. Upgrading from an alpha (`scripts/guard-upgrade-e2e.sh`, v2.0.0)
+On a fresh kind cluster:
+1. **Install the published 2.0.0-alpha.3** from GHCR (chart and image), and record with it an executed request and a pending one.
+2. **Upgrade the chart alone,** as `helm upgrade` does, leaving the old CRD: the new guard stops, and its log says to apply the CRD.
+3. **Apply the CRD and restart.** Then check:
+   - the guard is ready on `v1`, with `v1` stored and `v1alpha1` still served;
+   - the plugin, which speaks v1, lists the old records;
+   - `kubectl sentinel audit verify` passes on the events the alpha signed;
+   - `actionrequests.v1alpha1.sentinel.dev` is still readable;
+   - the request left pending is approved with the new plugin and admitted once, and a different change is not;
+   - the chain verifies with events from both versions.
+
+Last run: 8/8, 2026-10-25.
 
 ## 5. Adding tests: rules
 - New DB behavior → a Testcontainers IT that connects as `sentinel_app` (not the container superuser).

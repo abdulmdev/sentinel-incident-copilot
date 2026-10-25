@@ -1,7 +1,7 @@
 """A refund agent whose refunds need a human, using the Sentinel Guard Python SDK.
 
     docker run --rm -p 8080:8080 -e SENTINEL_GUARD_AGENT_TOKENS=refund-bot=agent-secret \
-      -e SENTINEL_GUARD_ADMIN_TOKEN=approver-secret ghcr.io/abdulmdev/sentinel-guard:2.0.0-alpha.3
+      -e SENTINEL_GUARD_ADMIN_TOKEN=approver-secret ghcr.io/abdulmdev/sentinel-guard:2.0.0
     SENTINEL_GUARD_TOKEN=agent-secret python agent.py order-1042 42.00
 
 The agent asks first. The guard records the request and waits for a human (this script waits up to

@@ -5,8 +5,8 @@ description: >-
   or a human, approved that exact change, and then only once. Humans, CI and controllers are
   never affected.
 type: application
-version: 2.0.0-alpha.3
-appVersion: 2.0.0-alpha.3
+version: 2.0.0
+appVersion: 2.0.0
 kubeVersion: ">=1.30.0-0"
 home: https://abdulmdev.github.io/sentinel-incident-copilot/
 sources:
@@ -17,17 +17,17 @@ maintainers:
     url: https://github.com/abdulmdev
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/prerelease: "true"
+  artifacthub.io/prerelease: "false"
   artifacthub.io/category: security
   artifacthub.io/crds: |
     - kind: ActionRequest
-      version: v1alpha1
+      version: v1
       name: actionrequests.sentinel.dev
       displayName: ActionRequest
       description: An action an AI agent proposed, its approval and its audit trail.
   artifacthub.io/images: |
     - name: sentinel-guard
-      image: ghcr.io/abdulmdev/sentinel-guard:2.0.0-alpha.3
+      image: ghcr.io/abdulmdev/sentinel-guard:2.0.0
       platforms: [linux/amd64, linux/arm64]
   artifacthub.io/links: |
     - name: Documentation

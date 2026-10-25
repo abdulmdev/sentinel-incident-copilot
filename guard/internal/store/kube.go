@@ -27,7 +27,7 @@ import (
 )
 
 // ActionRequests is the custom resource that holds every request.
-var ActionRequests = schema.GroupVersionResource{Group: "sentinel.dev", Version: "v1alpha1", Resource: "actionrequests"}
+var ActionRequests = schema.GroupVersionResource{Group: "sentinel.dev", Version: "v1", Resource: "actionrequests"}
 
 const (
 	KeyLabel      = "sentinel.dev/key"
@@ -108,7 +108,7 @@ func ToObject(r *guard.Request) (*unstructured.Unstructured, error) {
 		return nil, err
 	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "sentinel.dev/v1alpha1", "kind": "ActionRequest",
+		"apiVersion": "sentinel.dev/v1", "kind": "ActionRequest",
 		"metadata": map[string]any{"name": r.ID, "labels": map[string]any{KeyLabel: r.Key}},
 		"spec":     pick(fields, specFields), "status": pick(fields, statusFields),
 	}}

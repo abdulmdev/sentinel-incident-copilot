@@ -1,47 +1,66 @@
-**Sentinel Guard 2.0.0-alpha.3: any agent, provable records, one command to try.** SDKs and a zero-code MCP proxy for agents outside Kubernetes; a signed evidence export anyone can verify offline; guardian alerts on agent drift; and `docker compose up` with a live agent and an approvals inbox.
+**Sentinel 2.0.0: Sentinel Guard, the safe-action layer for any AI agent.** No agent changes production unless policy, or the right people, approved that exact change, and then it runs once. Every decision is signed and provable to others. Sentinel's own incident copilot runs on it.
 
-**Try it**
+**Try it in one command**
 
 ```bash
 git clone https://github.com/abdulmdev/sentinel-incident-copilot && cd sentinel-incident-copilot
-docker compose up        # then open http://localhost:8080, token approve-me
+docker compose up        # then open http://localhost:8080 as Alice (token alice-demo) or Bob (bob-demo)
 ```
 
-**Install**
+**Install on Kubernetes**
 
 ```bash
-helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.3 -n sentinel-system --create-namespace
+helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0 -n sentinel-system --create-namespace
 ```
 
-Or `kubectl apply -f install.yaml` (attached below). The kubectl plugin is attached too (`kubectl-sentinel_<os>_<arch>.tar.gz`), or install it with krew. The Python SDK (wheel) and the TypeScript SDK (npm tarball) are attached as well.
+Or `kubectl apply -f install.yaml` (attached below). The kubectl plugin is attached too (`kubectl-sentinel_<os>_<arch>.tar.gz`), or install it with krew. The Python SDK (wheel) and the TypeScript SDK (npm tarball) are attached as well. The image and the chart are signed with cosign (keyless).
 
-**New since alpha.2**
-- **SDKs and the MCP proxy.**
-  - Python and TypeScript SDKs: `require`, then `spend`, or a decorator.
-  - A LangChain/LangGraph tool wrapper.
-  - `sentinel-guard-mcp-proxy`, which puts the guard in front of any MCP server's tools with no code.
-- **Evidence export.**
-  - `kubectl sentinel audit export` (or `GET /v1/audit/export` for policy `auditors`) writes one self-verifying file.
-  - `kubectl sentinel audit verify --bundle` checks it offline, against a pinned key (`--jwks`) and an archived export (`--previous`).
-  - Each request now names the version of the policy it was decided under, and chain heads are signed.
-- **Guardian monitoring.**
-  - Every replica re-verifies the audit chain.
-  - New metrics: per-agent outcomes, the approval backlog and chain health.
-  - `prometheusRule.enabled=true` installs 8 alerts: integrity, oversight lapses, and drift in each agent's behaviour.
-  - `grafanaDashboard.enabled=true` adds the Sentinel Guard dashboard.
-- **An approvals inbox** in single-process mode (`docker run`, `docker compose`). Open the guard's URL to approve or deny in a browser, verify the chain, and download the evidence.
-- **`sentinel-guard -healthcheck`,** for container health checks.
-- **Fixed:** the CRD lacked `spec.decidedVia`, so delegated decisions lost it in Kubernetes mode.
-- **The chart is now signed** with cosign, like the image.
+**What's in v2**
+- **Enforcement at the Kubernetes API:**
+  - an admission webhook holds agents' changes (coding agents with `kubectl`, CI bots, any agent) with no code changes;
+  - an approval admits exactly that change, once, including across the API server's own retries;
+  - humans, CI and controllers are never slowed down;
+  - if the guard is down, only agents are stopped.
+- **Any agent, anywhere:**
+  - Python and TypeScript SDKs;
+  - a LangChain/LangGraph tool wrapper;
+  - a zero-code MCP proxy that puts the guard in front of any MCP server's tools.
+- **People decide, as themselves:**
+  - in Kubernetes with `kubectl sentinel approve`;
+  - elsewhere with personal tokens or OIDC tokens the guard verifies;
+  - in an inbox with an Overview of every agent's actions and the full story of each request.
+  - The riskiest actions can require two or more different people (`approvals: N`).
+  - Notifications go to Slack-style webhooks.
+- **Provable to others:**
+  - every request, decision and execution is a signed link in a hash chain;
+  - `kubectl sentinel audit export` produces one evidence file anyone can verify offline, against a pinned key and an archived export;
+  - every replica re-verifies the chain, and tested alert rules flag drift in each agent's behaviour;
+  - mapped to the EU AI Act and the NIST AI RMF ([docs/compliance](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/compliance/README.md)).
+- **SafeActionBench,** an open benchmark for harmful agent actions. An independent guard alone took a small model from 33.9% harmful to 0%.
+
+**New since 2.0.0-alpha.3**
+- Two-person approvals, approvers verified by OIDC, delegates forwarding the person's token, and notifications.
+- The inbox's Overview and per-request details, with deep links.
+- An incident whose guard request is gone can be closed. Alerts never join an incident that has ended.
+- A fresh read before "pending", so an approval made a moment ago through another replica counts at once.
+- **The API is stable: `sentinel.dev/v1`.** `v1alpha1` is still served, deprecated.
+
+**Upgrading from an alpha**
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/abdulmdev/sentinel-incident-copilot/v2.0.0/deploy/helm/sentinel-guard/crds/actionrequests.sentinel.dev.yaml
+helm upgrade sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0 -n sentinel-system
+```
+
+`helm upgrade` never updates CRDs. A 2.0.0 guard on the old CRD stops, and its log says exactly what to apply. Records from the alpha releases are read through v1 and keep verifying, and requests pending across the upgrade can still be approved. CI tests this path from 2.0.0-alpha.3 on a real API server.
 
 **Measured**
-- **Guard end to end on a real API server:** 31/31 checks, including tampered evidence and the guard taken down. p99 for an approved change admitted once: 40.8 ms (3 replicas).
-- **Evidence:** verifying 1,000 requests (3,000 events) takes about 0.18 s; the bundle is about 2.1 KB per request.
-- **The quickstart:** 18/18 checks in CI, with Prometheus and Grafana.
-- **307 automated tests.**
+- **On a real API server:** 33/33 end-to-end checks, and the upgrade test.
+- **Latency (p99, 3 replicas, through the API server):**
+  - an approved change admitted once: 34.6 ms;
+  - an agent change waiting for approval: 7.5 ms;
+  - a human's change: 6.1 ms.
+- **The `docker compose` quickstart:** 29/29 checks in CI.
+- **329 automated tests.**
 
-**Upgrading from alpha.2:** requests recorded by older guards carry no policy version and their head is unsigned. Both still verify, with a note.
-
-**Alpha:** the API and the CRD (`v1alpha1`) may change.
-
-Docs: [docs/guard/README.md](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md) · design: [handbook chapter 17](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/handbook/17-lld-sentinel-guard.md) · governance: [docs/compliance](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/compliance/README.md) · decisions: [ADR-0012](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/adr/0012-sdks-and-the-mcp-proxy.md), [ADR-0014](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/adr/0014-governance-evidence-and-guardian-monitoring.md), [ADR-0015](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/adr/0015-quickstart-inbox-and-opt-in-publishing.md)
+Docs: [docs/guard/README.md](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md) · design: [handbook chapter 17](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/handbook/17-lld-sentinel-guard.md) · decisions: [ADR-0010](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/adr/0010-sentinel-guard.md) to [ADR-0018](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/adr/0018-a-stable-api-for-v2.md)

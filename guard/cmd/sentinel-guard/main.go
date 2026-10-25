@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	admregv1client "k8s.io/client-go/kubernetes/typed/admissionregistration/v1"
 	authnv1client "k8s.io/client-go/kubernetes/typed/authentication/v1"
@@ -164,6 +165,15 @@ func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, ser
 		dyn, err := dynamic.NewForConfig(cfg)
 		if err != nil {
 			return err
+		}
+		// helm upgrade never updates CRDs: say exactly what to apply instead of failing on every request.
+		disco, err := discovery.NewDiscoveryClientForConfig(cfg)
+		if err != nil {
+			return err
+		}
+		if _, err := disco.ServerResourcesForGroupVersion(store.ActionRequests.GroupVersion().String()); err != nil {
+			return fmt.Errorf("the ActionRequest CRD does not serve %s (%v). Helm doesn't upgrade CRDs: apply the chart's "+
+				"crds/actionrequests.sentinel.dev.yaml (kubectl apply -f), then restart the guard", store.ActionRequests.GroupVersion(), err)
 		}
 		kst := &store.Kube{Dynamic: dyn, Core: core, Namespace: ns}
 		if err := kst.Start(ctx); err != nil {

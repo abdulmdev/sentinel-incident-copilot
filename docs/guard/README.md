@@ -9,7 +9,7 @@ Guard is the safety core of [Sentinel](../../README.md) (approval → single-use
 - **Tamper-evident, and provable to others.** Every request, decision and execution is a signed link in a hash chain. `kubectl sentinel audit verify` checks it yourself, and also detects deleted records. `kubectl sentinel audit export` produces one evidence file that anyone can verify offline ([governance and compliance](../compliance/README.md)).
 - **Small.** One Go binary, an 11.5 MB image (compressed). It needs no database: its state lives in the Kubernetes API, so three replicas share it.
 
-> **Status: v2.0.0-alpha.3.** The design and the safety properties are tested on a real API server in CI (33 checks, below). Treat the API and the CRD (`v1alpha1`) as subject to change.
+> **Status: v2.0.0, stable.** The safety properties are tested on a real API server in CI: 33 end-to-end checks, plus an upgrade from the last alpha (below). The ActionRequest API is `sentinel.dev/v1`, and changes within v2 stay backward compatible. `v1alpha1` is still served, deprecated. **Upgrading from an alpha:** apply the chart's CRD first (`kubectl apply -f crds/actionrequests.sentinel.dev.yaml`, because `helm upgrade` never updates CRDs), then upgrade the chart.
 
 ## Try it in one command (Docker, no cluster)
 From a clone of the repository:
@@ -41,7 +41,7 @@ The same guard runs as a single process with an HTTP API: an agent asks before a
 
 ```bash
 docker run --rm -p 8080:8080 -e SENTINEL_GUARD_AGENT_TOKENS=refund-bot=agent-secret \
-  -e SENTINEL_GUARD_ADMIN_TOKEN=approver-secret ghcr.io/abdulmdev/sentinel-guard:2.0.0-alpha.3
+  -e SENTINEL_GUARD_ADMIN_TOKEN=approver-secret ghcr.io/abdulmdev/sentinel-guard:2.0.0
 ```
 
 The agent proposes an action. The guard answers `pending`, with a request id:
@@ -78,14 +78,14 @@ Single-process mode keeps state in memory: it's for trying Guard out and for tes
 Requires Kubernetes 1.30 or newer (the webhook uses `matchConditions`).
 
 ```bash
-helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.3 \
+helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0 \
   -n sentinel-system --create-namespace
 ```
 
 Or without Helm:
 
 ```bash
-kubectl apply -f https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.3/install.yaml
+kubectl apply -f https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0/install.yaml
 ```
 
 Then install the kubectl plugin:
@@ -290,7 +290,7 @@ The end-to-end suite (`scripts/guard-e2e.sh`, run in CI) passes 33 checks agains
 - the audit chain verifies, the evidence export verifies offline, an edited export fails, and a later export extends an archived one;
 - an action that needs two people waits after the first approval, refuses the same person twice, and is admitted once after a second person approves.
 
-## Limits (alpha)
+## Limits
 - Retention: `ActionRequest` objects are kept (they are the audit record), about 2 KB per request. Export and archive them (`kubectl sentinel audit export`); there is no compaction yet.
 - The audit chain head is a single ConfigMap: every event is serialized through it. That's fine at human-approval rates, but it's not a high-volume event log.
 - One cluster per guard. API-mode agents in single-process mode keep state in memory only.

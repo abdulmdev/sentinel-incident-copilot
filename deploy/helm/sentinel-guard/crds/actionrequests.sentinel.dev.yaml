@@ -15,9 +15,113 @@ spec:
     categories: [sentinel]
   scope: Namespaced
   versions:
-    - name: v1alpha1
+    - name: v1
       served: true
       storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - {name: Phase, type: string, jsonPath: .status.phase}
+        - {name: Agent, type: string, jsonPath: .spec.agent}
+        - {name: Action, type: string, jsonPath: .spec.action}
+        - {name: Namespace, type: string, jsonPath: .spec.target.namespace}
+        - {name: Target, type: string, jsonPath: .spec.target.name}
+        - {name: Decided-By, type: string, jsonPath: .spec.decidedBy, priority: 1}
+        - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            An action an AI agent proposed, and everything that happened to it. Created by Sentinel Guard
+            only. Approvers set spec.decision (approve or deny) once; the guard records who and when.
+          properties:
+            apiVersion: {type: string}
+            kind: {type: string}
+            metadata: {type: object}
+            spec:
+              type: object
+              required: [key, source, agent, action, target, fingerprint, createdAt]
+              properties:
+                key: {type: string, description: "Binds an approval to exactly this agent, action, target and change."}
+                source: {type: string, enum: [admission, api]}
+                agent: {type: string}
+                action: {type: string}
+                target:
+                  type: object
+                  properties:
+                    group: {type: string}
+                    resource: {type: string}
+                    namespace: {type: string}
+                    name: {type: string}
+                change:
+                  type: object
+                  additionalProperties: {type: string}
+                fingerprint: {type: string}
+                intent: {type: string}
+                risk: {type: string}
+                autonomy: {type: string}
+                createdAt: {type: string}
+                policyVersion: {type: string, description: "SHA-256 of the effective policy the request was evaluated under (see the sentinel-guard-policies ConfigMap)."}
+                decision: {type: string, enum: [approve, deny], description: "Set by an approver (kubectl sentinel approve / deny)."}
+                decisionNote: {type: string}
+                decidedBy: {type: string, description: "Stamped by the guard's webhook from the authenticated identity."}
+                decidedVia: {type: string, description: "The delegate that authenticated decidedBy (for example Sentinel's gateway), if any."}
+                decidedAt: {type: string}
+                requiredApprovals: {type: integer, minimum: 0, maximum: 5, description: "How many different people must approve (policy approvals)."}
+                approvals:
+                  type: array
+                  description: "Approvals before the last, for requests that need more than one person. Added by the guard's webhook from the authenticated identity."
+                  items:
+                    type: object
+                    required: [by, at]
+                    properties:
+                      by: {type: string}
+                      via: {type: string}
+                      at: {type: string}
+                      note: {type: string}
+            status:
+              type: object
+              properties:
+                phase: {type: string, enum: [Pending, Approved, Denied, Executed, Expired, Blocked]}
+                reasons: {type: array, items: {type: string}}
+                preconditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name: {type: string}
+                      status: {type: string}
+                      value: {type: string}
+                      error: {type: string}
+                expiresAt: {type: string}
+                executedAt: {type: string}
+                exact: {type: string, description: "Digest of the exact object admitted (for API server retries)."}
+                execGeneration: {type: integer, format: int64, description: "The target's metadata.generation when admitted."}
+                capabilityJti: {type: string}
+                audit:
+                  type: array
+                  description: This request's links in the guard's signed, hash-chained audit log.
+                  items:
+                    type: object
+                    properties:
+                      seq: {type: integer, format: int64}
+                      prev: {type: string}
+                      type: {type: string}
+                      at: {type: string}
+                      actor: {type: string}
+                      detail: {type: string}
+                      requestId: {type: string}
+                      digest: {type: string}
+                      kid: {type: string}
+                      hash: {type: string}
+                      sig: {type: string}
+    # Still served, so clients and objects from 2.0.0-alpha releases keep working. The schema is
+    # identical, so no conversion is needed; objects are stored as v1 when next written.
+    - name: v1alpha1
+      served: true
+      storage: false
+      deprecated: true
+      deprecationWarning: "sentinel.dev/v1alpha1 ActionRequest is deprecated; use sentinel.dev/v1"
       subresources:
         status: {}
       additionalPrinterColumns:

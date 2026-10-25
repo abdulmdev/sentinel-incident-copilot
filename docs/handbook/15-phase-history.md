@@ -789,6 +789,12 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 - **Quickstart: 29/29**, including the overview and deep-linked notifications.
 - **329 automated tests:** gateway 93 → 96, Go 68 → 70.
 
+**Released** as **v2.0.0** (2026-10-25), the first stable release of v2. Before the tag:
+- **A stable API:** the ActionRequest CRD serves `sentinel.dev/v1` (stored) and `v1alpha1` (deprecated, same schema), and the guard checks at startup that `v1` is served (ADR-0018).
+- **An upgrade test** from the published 2.0.0-alpha.3 (`scripts/guard-upgrade-e2e.sh`, in CI): 8/8 on the first run.
+- **Every version** set to 2.0.0: chart, image, both SDKs, install commands. The docs no longer say alpha.
+- **A test race fixed:** `TestNotifications` read the `sent` counter before the notifier had counted its second delivery. The sink records a notice before its answer reaches the notifier. It now waits for the count, and passed 20 runs in a row under the race detector.
+
 ---
 
 ## Template for the next entry

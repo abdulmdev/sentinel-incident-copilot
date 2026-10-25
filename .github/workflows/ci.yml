@@ -282,6 +282,24 @@ jobs:
       - if: failure()
         run: kubectl -n sentinel-system logs -l app.kubernetes.io/name=sentinel-guard --tail=100 || true
 
+  guard-upgrade:
+    # An upgrade as users do it: the last published release from GHCR, then this checkout's chart and image.
+    needs: [guard, deploy-config]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: guard/go.mod, cache-dependency-path: guard/go.sum }
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with: { install_only: true }
+      - name: Upgrade from 2.0.0-alpha.3 (scripts/guard-upgrade-e2e.sh)
+        run: |
+          mkdir -p .tools && ln -s "$(command -v kind)" .tools/kind && ln -s "$(command -v helm)" .tools/helm
+          scripts/guard-upgrade-e2e.sh
+      - if: failure()
+        run: kubectl -n sentinel-system logs -l app.kubernetes.io/name=sentinel-guard --tail=100 || true
+
   images:
     # Publish on main: one tag per commit (immutable in ECR/GHCR), multi-arch for Graviton nodes.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'

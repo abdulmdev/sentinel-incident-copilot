@@ -291,7 +291,11 @@ func TestNotifications(t *testing.T) {
 	if !strings.Contains(second.Text, "Approved by alice; needs 1 more") || second.Event.Needed != 1 {
 		t.Fatalf("the second notice: %+v", second)
 	}
-	if v := testutil.ToFloat64(s.Notify.Sent.WithLabelValues("sent")); v != 2 {
-		t.Fatalf("sent = %v", v)
+	// The sink records a notice before the notifier sees its answer and counts it: wait for the count.
+	for deadline := time.Now().Add(2 * time.Second); testutil.ToFloat64(s.Notify.Sent.WithLabelValues("sent")) != 2; {
+		if time.Now().After(deadline) {
+			t.Fatalf("sent = %v", testutil.ToFloat64(s.Notify.Sent.WithLabelValues("sent")))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

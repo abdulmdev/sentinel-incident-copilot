@@ -1,6 +1,6 @@
 [project]
 name = "sentinel-guard"
-version = "2.0.0a3"
+version = "2.0.0"
 description = "Python SDK for Sentinel Guard: ask before acting, get a single-use capability once a human approves, redeem it once."
 readme = "README.md"
 license = "Apache-2.0"

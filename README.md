@@ -25,12 +25,12 @@
 
 </div>
 
-## 🛡️ New in v2 (alpha): Sentinel Guard, envelope protection for *any* AI agent
+## 🛡️ New in v2: Sentinel Guard, envelope protection for *any* AI agent
 
 Sentinel's safety core now ships on its own. **No agent changes your cluster unless policy, or a human, approved that exact change, and then only once.** It works with coding agents running `kubectl`, CI and GitOps bots, and LangGraph or MCP agents, with no code changes, because it enforces at the Kubernetes API. Humans, CI and controllers are never sent to it, so if the guard is down they are unaffected and only agents wait.
 
 ```bash
-helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.3 -n sentinel-system --create-namespace
+helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0 -n sentinel-system --create-namespace
 ```
 
 ```
@@ -132,7 +132,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 | **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **329** automated tests (incl. 70 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 33 Guard checks on a real API server, promtool-tested alert rules, an asserted walkthrough and a checked `docker compose` quickstart; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **329** automated tests (incl. 70 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 33 Guard checks on a real API server and an 8-check upgrade test from the last alpha, promtool-tested alert rules, an asserted walkthrough and a checked `docker compose` quickstart; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 
@@ -272,8 +272,8 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 | 13 SafeActionBench | The incident benchmark as an open benchmark for any agent and any guard; an independent guard alone took a small model from 33.9% to 0% harmful |
 | 14 Governance and compliance | A signed evidence export anyone can verify offline, policy versions, signed checkpoints, guardian alerts on agent drift (tested with promtool), the EU AI Act / NIST AI RMF mapping, and a one-click Codespaces demo |
 | 15 Try it, ship it | `docker compose up` with a live agent, an approvals inbox in the guard, the guard's Grafana dashboard, signed charts and SDK packages on every release, with PyPI/npm/Artifact Hub publishing ready to switch on |
-| 16 Two people | `approvals: N` for the riskiest actions (distinct, authenticated people, every approval signed and verified), approvers verified by OIDC at the guard, notifications to Slack-style webhooks; v2.0.0-alpha.3 released |
-| 17 The whole picture | An Overview in the inbox (what agents did, what waits, the chain's health) and a details view for every request; rejections close incidents whose guard request is gone; alerts never join an ended incident; a fresh read so a just-made approval counts at once |
+| 16 Two people | `approvals: N` for the riskiest actions (distinct, authenticated people, every approval signed and verified), approvers verified by OIDC at the guard, notifications to Slack-style webhooks; v2.0.0 released |
+| 17 The whole picture | An Overview in the inbox (what agents did, what waits, the chain's health) and a details view for every request; rejections close incidents whose guard request is gone; alerts never join an ended incident; a fresh read so a just-made approval counts at once; released as **v2.0.0** (stable `sentinel.dev/v1` API, upgrades from the alphas tested in CI) |
 
 <details>
 <summary><b>All design decisions and their reasons</b></summary>

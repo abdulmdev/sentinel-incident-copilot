@@ -1197,7 +1197,7 @@ wheels = [
 
 [[package]]
 name = "sentinel-guard"
-version = "2.0.0a3"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

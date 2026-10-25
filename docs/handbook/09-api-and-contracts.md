@@ -269,6 +269,9 @@ The bundle carries no signature of its own: every part is signed, and verifiers 
 - ConfigMap `sentinel-guard-policies`: one key `<version>.json` per policy version, a signed `PolicyRecord`.
 - ConfigMap `sentinel-guard-audit-head`: now also `at`, `kid`, `sig` (the signed checkpoint).
 
+### 8.4a API version and stability (v2.0.0)
+`ActionRequest` is `sentinel.dev/v1`, the stored version. `v1alpha1` is still served (deprecated, identical schema). Within v2, the v1 API, the action API and the evidence format (`sentinel-guard-evidence/v1`) only gain optional fields, and records written by any v2 release keep verifying ([ADR-0018](../adr/0018-a-stable-api-for-v2.md)).
+
 ### 8.5 Two-person approvals (Phase 16)
 - Policy: `approvals: N` per action or in `defaults` (1 to 5; unset means 1 and leaves the policy version as it was). `approvers: {users, groups}`: who may decide over HTTP with an OIDC identity.
 - `ActionRequest.spec.requiredApprovals` (set only when N > 1) and `spec.approvals[]` (`{by, via?, at, note?}`, the approvals before the last).

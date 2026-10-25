@@ -351,3 +351,8 @@ A **details view** (a `<dialog>`) opens from any card, activity line or history 
 
 **The gateway side** (chapter 03 §decision and §alert linking): a rejection closes the incident even when the guard no longer has the request; stale alert links on ended incidents are released before an alert is linked.
 
+## 15. A stable API (v2.0.0)
+- **The CRD serves `sentinel.dev/v1`** (stored) and `v1alpha1` (deprecated). Both versions have the same schema, so the API server serves either without a conversion webhook. The store, the plugin and the guard's own objects use `v1`.
+- **A startup check** (`cmd/sentinel-guard`): in Kubernetes mode the guard asks discovery whether `sentinel.dev/v1` is served. If not, it exits with the fix: apply the chart's CRD file, because `helm upgrade` never updates CRDs.
+- **The promise** ([ADR-0018](../adr/0018-a-stable-api-for-v2.md)): within v2, the v1 API, the action API and the evidence format only gain optional fields, and records from any v2 release keep verifying. Records from the alphas verify too: the upgrade test checks the events alpha.3 signed (chapter 14 §4C).
+

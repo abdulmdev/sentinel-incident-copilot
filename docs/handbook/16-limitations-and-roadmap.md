@@ -69,6 +69,8 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 
 *Done in Phase 15:* `docker compose up` with a live agent, the approvals inbox, the guard's Grafana dashboard (in the chart too), signed charts and SDK packages on every release, with publishing ready to switch on.
 
+*Done for v2.0.0:* a stable `sentinel.dev/v1` API, with the alpha version still served and upgrades from the alphas tested in CI.
+
 *Done in Phase 17:* an Overview and per-request details in the inbox; incidents can't get stuck on a lost guard request or a stale alert link; an approval made a moment ago through another replica counts at once.
 
 *Done in Phase 16:* *N*-of-*M* approvals (distinct, authenticated people; signed and verified), approvers verified by OIDC or personal tokens, delegates forwarding the person's token, notifications.

@@ -143,7 +143,7 @@ Sentinel Guard keeps all of its state in the API server of the cluster it protec
 
 | Object (namespace `sentinel-system`) | Written by | Content |
 |---|---|---|
-| `ActionRequest` (`actionrequests.sentinel.dev/v1alpha1`, CRD in `deploy/helm/sentinel-guard/crds/`) | the guard (create, status); approvers (`spec.decision`, `spec.decisionNote` only, enforced by the guard's webhook) | `spec`: key, source, agent, action, target `{group, resource, namespace, name}`, change, fingerprint, intent, risk, autonomy, createdAt, decision, decidedBy, decisionNote, decidedAt. `status`: phase, reasons, preconditions, expiresAt, executedAt, exact, execGeneration, capabilityJti, audit (this request's chain events). Label `sentinel.dev/key` (indexed) |
+| `ActionRequest` (`actionrequests.sentinel.dev/v1`, stored; `v1alpha1` still served, deprecated, same schema; CRD in `deploy/helm/sentinel-guard/crds/`) | the guard (create, status); approvers (`spec.decision`, `spec.decisionNote` only, enforced by the guard's webhook) | `spec`: key, source, agent, action, target `{group, resource, namespace, name}`, change, fingerprint, intent, risk, autonomy, createdAt, decision, decidedBy, decisionNote, decidedAt. `status`: phase, reasons, preconditions, expiresAt, executedAt, exact, execGeneration, capabilityJti, audit (this request's chain events). Label `sentinel.dev/key` (indexed) |
 | ConfigMap `sentinel-guard-audit-head` | the guard | `seq`, `hash`, `voids` (JSON: signed voided places) |
 | ConfigMap `sentinel-guard-jwks` | the guard | `jwks.json`: the public key that verifies events and capabilities |
 | Secret `sentinel-guard-signing` | the guard, on first start | `key.pem` (EC P-256) |

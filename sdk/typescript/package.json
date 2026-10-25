@@ -1,6 +1,6 @@
 {
   "name": "@sentinel-guard/sdk",
-  "version": "2.0.0-alpha.3",
+  "version": "2.0.0",
   "description": "TypeScript SDK for Sentinel Guard: ask before acting, get a single-use capability once a human approves, redeem it once.",
   "license": "Apache-2.0",
   "type": "module",

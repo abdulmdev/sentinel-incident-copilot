@@ -153,7 +153,7 @@ func approvalReview(user string, groups []string, before *guard.Request, after *
 	o2, _ := store.ToObject(after)
 	return admissionv1.AdmissionReview{Request: &admissionv1.AdmissionRequest{
 		UID: "uid-2", Operation: admissionv1.Update, Name: before.ID,
-		Resource: metav1.GroupVersionResource{Group: "sentinel.dev", Version: "v1alpha1", Resource: "actionrequests"},
+		Resource: metav1.GroupVersionResource{Group: "sentinel.dev", Version: "v1", Resource: "actionrequests"},
 		UserInfo: authnv1.UserInfo{Username: user, Groups: groups}, OldObject: raw(o1.Object), Object: raw(o2.Object),
 	}}
 }
