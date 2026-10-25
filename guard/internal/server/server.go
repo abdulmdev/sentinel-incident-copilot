@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -63,6 +64,18 @@ type Server struct {
 	Log        *slog.Logger
 	Ready      func() bool
 	Version    string
+
+	lastVerify atomic.Pointer[Verification] // the guardian monitor's last full verification
+}
+
+// Verification is the result of the last self-verification of the audit chain.
+type Verification struct {
+	OK       bool      `json:"ok"`
+	Events   int       `json:"events"`
+	Requests int       `json:"requests"`
+	HeadSeq  int64     `json:"headSeq"`
+	Problems []string  `json:"problems,omitempty"`
+	At       time.Time `json:"at"`
 }
 
 func (s *Server) Handler() http.Handler { return s.handler(true) }
@@ -89,6 +102,7 @@ func (s *Server) handler(admission bool) http.Handler {
 	mux.HandleFunc("GET /v1/actions/{id}", s.agentOnly(s.status))
 	mux.HandleFunc("GET /v1/actions", s.approversOnly(s.list))
 	mux.HandleFunc("GET /v1/whoami", s.whoami)
+	mux.HandleFunc("GET /v1/overview", s.auditors(s.overview))
 	mux.HandleFunc("POST /v1/actions/{id}/approve", s.deciders(s.decide(true)))
 	mux.HandleFunc("POST /v1/actions/{id}/deny", s.deciders(s.decide(false)))
 	mux.HandleFunc("POST /v1/capabilities/spend", s.spend)
@@ -256,6 +270,70 @@ func (s *Server) approversOnly(next http.HandlerFunc) http.HandlerFunc {
 		}
 		writeError(w, 401, "an approver's token (or the admin token) is required")
 	}
+}
+
+// Overview is the high-level picture behind the inbox: what each agent's proposals came to, what
+// waits for people and for how long, and the state of the record. Everything is derived from the
+// requests and their signed events (the same summary the evidence bundle carries).
+type Overview struct {
+	Summary              guard.OversightSummary `json:"summary"`
+	Pending              int                    `json:"pending"`
+	ApprovedUnspent      int                    `json:"approvedUnspent"`
+	OldestPendingSeconds float64                `json:"oldestPendingSeconds"`
+	Agents               []AgentOverview        `json:"agents"`
+	PolicyVersion        string                 `json:"policyVersion"`
+	Chain                *Verification          `json:"chain,omitempty"` // nil until the first self-verification
+	GuardVersion         string                 `json:"guardVersion,omitempty"`
+}
+
+type AgentOverview struct {
+	Agent    string         `json:"agent"`
+	Outcomes map[string]int `json:"outcomes"`
+	Waiting  int            `json:"waiting"` // pending a person right now
+	LastSeen time.Time      `json:"lastSeen"`
+}
+
+func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
+	reqs, err := s.Engine.Store.List(r.Context())
+	if err != nil {
+		s.writeErr(w, err)
+		return
+	}
+	now := s.Engine.Now()
+	ov := Overview{Summary: guard.Summarize(reqs), PolicyVersion: s.Engine.PolicyVersion(), Chain: s.lastVerify.Load(),
+		GuardVersion: s.Version}
+	agents := map[string]*AgentOverview{}
+	for _, req := range reqs {
+		a := agents[req.Agent]
+		if a == nil {
+			a = &AgentOverview{Agent: req.Agent, Outcomes: ov.Summary.ByAgent[req.Agent]}
+			if a.Outcomes == nil {
+				a.Outcomes = map[string]int{}
+			}
+			agents[req.Agent] = a
+		}
+		if req.CreatedAt.After(a.LastSeen) {
+			a.LastSeen = req.CreatedAt
+		}
+		if !req.Phase.Open() || !now.Before(req.ExpiresAt) {
+			continue
+		}
+		switch req.Phase {
+		case guard.PhasePending:
+			ov.Pending++
+			a.Waiting++
+			if age := now.Sub(req.CreatedAt).Seconds(); age > ov.OldestPendingSeconds {
+				ov.OldestPendingSeconds = age
+			}
+		case guard.PhaseApproved:
+			ov.ApprovedUnspent++
+		}
+	}
+	for _, a := range agents {
+		ov.Agents = append(ov.Agents, *a)
+	}
+	sort.Slice(ov.Agents, func(i, j int) bool { return ov.Agents[i].LastSeen.After(ov.Agents[j].LastSeen) })
+	writeJSON(w, 200, ov)
 }
 
 // whoami tells a caller who the guard takes them for, and what they may do: the inbox shows it.

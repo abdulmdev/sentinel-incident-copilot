@@ -66,6 +66,8 @@ func (s *Server) selfVerify(ctx context.Context) {
 		s.Log.Warn("audit self-verification could not run", "error", err)
 		return
 	}
+	s.lastVerify.Store(&Verification{OK: rep.OK, Events: rep.Events, Requests: rep.Requests, HeadSeq: rep.HeadSeq,
+		Problems: rep.Problems, At: s.Engine.Now().UTC()})
 	if rep.OK {
 		s.Metrics.ChainOK.Set(1)
 	} else {

@@ -222,6 +222,32 @@ class IncidentControllerTest {
     }
 
     @Test
+    void aRejectionClosesTheIncidentEvenWhenTheGuardNoLongerHasTheRequest() throws Exception {
+        when(guard.decide(any(), anyBoolean(), any(), any())).thenThrow(new GuardClient.GuardException(
+                HttpStatus.NOT_FOUND, "not found: request ar-1a2b3c4d-1"));
+        when(agent.decide(any(), any(), any(), any())).thenReturn(Map.of("status", "CLOSED_NO_ACTION"));
+
+        decide("carol@acme", false);
+
+        verify(agent).decide(eq("acme"), eq(ID), any(), any());
+        verify(alertLinks).deactivate("acme", java.util.UUID.fromString(ID));
+    }
+
+    @Test
+    void anApprovalTheGuardNoLongerKnowsSaysHowToGetUnstuck() throws Exception {
+        when(guard.decide(any(), anyBoolean(), any(), any())).thenThrow(new GuardClient.GuardException(
+                HttpStatus.NOT_FOUND, "not found: request ar-1a2b3c4d-1"));
+
+        mvc.perform(post("/api/v1/incidents/" + ID + "/decision")
+                        .with(jwt().jwt(j -> j.subject("carol@acme").claim("tenant_id", "acme")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"approved\":true}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("Reject it to close this incident")));
+        verify(agent, never()).decide(any(), any(), any(), any());
+    }
+
+    @Test
     void executionIsAuditedWithTheGuardRequestCapabilityAndVerificationOutcome() throws Exception {
         when(agent.decide(any(), any(), any(), any())).thenReturn(Map.of("status", "RESOLVED",
                 "execution", Map.of("executed", true, "capability_jti", "cap-9", "guard_request", "ar-1a2b3c4d-1"),

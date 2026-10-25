@@ -435,3 +435,49 @@ func TestAPIServerRetryIsReadmittedButNewAttemptsAreNot(t *testing.T) {
 		t.Fatalf("%+v", rep)
 	}
 }
+
+// laggingStore serves FindByKey from a stale snapshot, as a replica's watch cache can for a few
+// milliseconds after someone approves through another replica; Refresh reads the truth.
+type laggingStore struct {
+	*store.Memory
+	stale map[string]*guard.Request
+}
+
+func (s *laggingStore) FindByKey(ctx context.Context, key string) ([]*guard.Request, error) {
+	reqs, err := s.Memory.FindByKey(ctx, key)
+	for i, r := range reqs {
+		if old, ok := s.stale[r.ID]; ok {
+			c := *old
+			reqs[i] = &c
+		}
+	}
+	return reqs, err
+}
+
+func (s *laggingStore) Refresh(ctx context.Context, id string) (*guard.Request, error) {
+	return s.Memory.Get(ctx, id)
+}
+
+func TestAnApprovalMadeThroughAnotherReplicaIsSeenAtOnce(t *testing.T) {
+	_, mem, _ := defaultEngine(t)
+	p, _ := guard.ParsePolicy(policies.Default)
+	key, _ := guard.GenerateKeyPEM()
+	signer, _ := guard.NewSigner(key, "test")
+	lag := &laggingStore{Memory: mem, stale: map[string]*guard.Request{}}
+	e := guard.NewEngine(lag, signer, nil, p)
+	ctx := context.Background()
+
+	out := mustEval(t, e, scaleTo("3"), guard.VerdictPending)
+	snapshot := *out.Request
+	lag.stale[out.Request.ID] = &snapshot // this replica's cache still says: pending, undecided
+	now := time.Now()
+	if _, err := mem.Update(ctx, out.Request.ID, func(r *guard.Request) error {
+		r.Decision, r.DecidedBy, r.DecidedAt = "approve", "alice", &now // written through another replica
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustEval(t, e, scaleTo("3"), guard.VerdictAllow); got.Request.DecidedBy != "alice" {
+		t.Fatalf("the approval must count at once: %+v", got.Request)
+	}
+}

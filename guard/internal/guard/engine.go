@@ -199,6 +199,15 @@ func (e *Engine) useExisting(ctx context.Context, p Proposal, key string) (Outco
 			_, _ = e.expire(ctx, r)
 			continue
 		}
+		if r.Phase == PhasePending && r.Decision == "" {
+			// About to answer "waiting for approval": make sure nobody approved it a moment ago through
+			// another replica (an approver who retries right after approving must not be told to wait).
+			if rf, ok := e.Store.(Refresher); ok {
+				if fresh, err := rf.Refresh(ctx, r.ID); err == nil {
+					r = fresh
+				}
+			}
+		}
 		if r.Phase == PhasePending && r.Decision != "" {
 			if r, err = e.finalize(ctx, r); err != nil {
 				return Outcome{}, false, err

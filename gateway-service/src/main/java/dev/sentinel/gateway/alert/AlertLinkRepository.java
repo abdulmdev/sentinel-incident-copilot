@@ -39,6 +39,13 @@ public class AlertLinkRepository {
         return tx.execute(s -> {
             bind(tenant);
             jdbc.sql("SELECT pg_advisory_xact_lock(hashtext(?))").param(tenant + "/" + service).query().singleRow();
+            // An incident that ended by another path (marked failed, or closed outside the decision flow)
+            // must not keep catching alerts: release its links first, so this alert opens a new incident.
+            jdbc.sql("""
+                    UPDATE alert_links l SET active = false FROM incidents i
+                    WHERE l.incident_id = i.id AND l.tenant_id = ? AND l.active
+                      AND i.status IN ('RESOLVED', 'CLOSED_NO_ACTION', 'FAILED')""")
+                    .param(tenant).update();
             Optional<UUID> same = jdbc.sql("""
                     UPDATE alert_links SET last_seen = now(), fire_count = fire_count + 1
                     WHERE tenant_id = ? AND fingerprint = ? AND active RETURNING incident_id""")

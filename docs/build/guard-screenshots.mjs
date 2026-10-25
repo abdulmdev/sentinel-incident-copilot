@@ -1,5 +1,5 @@
 // Captures the Sentinel Guard quickstart for the handbook (docs/handbook/images/screens/):
-// the approvals inbox and the guard's Grafana dashboard.
+// the inbox's Overview, its approvals list, one request's details, and the guard's Grafana dashboard.
 // Prerequisite, from the repository root: docker compose --profile monitoring up -d --build --wait
 // (let the demo agent run a minute or two, so there is something to show; approve an account
 // closure as Alice first, so Bob's view shows a two-person request half approved).
@@ -34,10 +34,21 @@ try {
   await page.goto(`${GUARD}/`, { waitUntil: "networkidle0" });
   await page.type("#token", TOKEN);
   await page.click("#sign-in-form button[type=submit]");
+  await page.waitForFunction(() => document.querySelectorAll("#agents tr").length > 0 && document.querySelectorAll("#activity li").length > 5);
+  await page.click('.tab[data-tab="overview"]');
+  await shot("guard-overview");
+  await page.click('.tab[data-tab="inbox"]');
   await page.waitForSelector("#pending .request");
-  await page.click("#verify");
-  await page.waitForFunction(() => document.querySelector("#audit").textContent.includes("Audit chain"));
   await shot("guard-inbox");
+  // The details of a request someone has already approved, if there is one (a two-person closure).
+  const id = await page.evaluate(() => {
+    const half = [...document.querySelectorAll("#pending .request")].find((c) => c.querySelector(".approvals")?.textContent.includes("approved by"));
+    return (half || document.querySelector("#pending .request"))?.dataset.id;
+  });
+  await page.evaluate((rid) => { location.hash = rid; }, id);
+  await page.waitForFunction(() => document.querySelector("#detail").open);
+  await shot("guard-request", { fullPage: false });
+  await page.keyboard.press("Escape");
 
   await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
   await page.goto(`${GRAFANA}/d/sentinel-guard?orgId=1&from=now-30m&to=now&kiosk`, { waitUntil: "networkidle0" });

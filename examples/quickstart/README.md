@@ -7,7 +7,7 @@ docker compose --profile monitoring up    # also Prometheus and Grafana
 
 | Open | What you'll see |
 |---|---|
-| http://localhost:8080 | The approvals inbox. Sign in as Alice (**`alice-demo`**) or Bob (**`bob-demo`**): the guard records each decision as the person whose token it is |
+| http://localhost:8080 | The inbox. Sign in as Alice (**`alice-demo`**) or Bob (**`bob-demo`**): the guard records each decision as the person whose token it is. It opens on an **Overview** (what waits, what ran, what was blocked, each agent, the activity); click any request for its details and signed audit trail |
 | `docker compose logs -f agent` | The agent's side: what it asked, what the guard answered, what it did |
 | `docker compose logs -f notifications` | What Slack would receive: each request that needs someone, with a link to the inbox |
 | http://localhost:9090/alerts | *(monitoring)* Prometheus with the chart's guardian alerts and recording rules |
@@ -56,14 +56,15 @@ uv run --with httpx python examples/quickstart/check.py --monitoring
 docker compose --profile monitoring down
 ```
 
-It checks 28 things:
+It checks 29 things:
 - the inbox, its security headers, and who a token belongs to;
 - each path the agent takes;
 - an approval leading to exactly one execution, and a reused capability refused;
 - nobody deciding under someone else's name;
 - a denial reaching the agent with its note;
 - the account closure: Alice's approval keeps it waiting, Alice can't count twice, and Bob's approval decides it;
-- the notifications;
+- the notifications, each linking straight to its request;
+- the overview's counts and the chain's health;
 - the audit chain and the evidence export;
 - Prometheus's rules and scrape;
 - Grafana's dashboard.

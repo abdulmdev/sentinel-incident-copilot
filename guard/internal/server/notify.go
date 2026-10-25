@@ -103,7 +103,7 @@ func (n *Notifier) notice(kind string, r *guard.Request) Notice {
 		d.Approvals = append(d.Approvals, a.By)
 	}
 	if n.PublicURL != "" {
-		d.URL = n.PublicURL + "/inbox/"
+		d.URL = n.PublicURL + "/inbox/#" + r.ID // opens the request's details
 	}
 	keys := make([]string, 0, len(r.Change))
 	for k := range r.Change {
@@ -136,7 +136,7 @@ func (n *Notifier) notice(kind string, r *guard.Request) Notice {
 	switch {
 	case kind != "approval_needed":
 	case d.URL != "":
-		fmt.Fprintf(&b, " Decide: %s (request %s)", d.URL, r.ID)
+		fmt.Fprintf(&b, " Decide: %s", d.URL)
 	default:
 		fmt.Fprintf(&b, " Decide: kubectl sentinel approve %s (or deny)", r.ID)
 	}

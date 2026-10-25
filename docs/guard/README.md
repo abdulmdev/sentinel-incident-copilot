@@ -26,9 +26,15 @@ That builds and starts the guard and a support-desk agent working behind it. Ope
 - now and then it reuses a spent capability, and the guard refuses (`docker compose logs -f agent`);
 - every request that needs someone is announced to a webhook; `docker compose logs -f notifications` shows what Slack would receive.
 
-The inbox also verifies the audit chain and downloads the evidence bundle. Add `--profile monitoring` for Prometheus, loaded with the chart's alert rules (`localhost:9090`), and the Sentinel Guard dashboard in Grafana (`localhost:3000`). More in [examples/quickstart](../../examples/quickstart/README.md).
+The inbox opens on an **Overview**:
+- what waits for people and for how long;
+- what ran, what policy blocked, what people denied;
+- whether the audit chain verifies;
+- each agent's record, and the latest activity in plain sentences.
 
-![The approvals inbox, signed in as Bob: refunds waiting, and an account closure Alice has approved that needs one more person](../handbook/images/screens/guard-inbox.png)
+Click any request for its **details**: the exact change, what the guard observed, who approved, what ran, and its signed audit trail. Notifications link straight there. *History* verifies the chain and downloads the evidence bundle. Add `--profile monitoring` for Prometheus, loaded with the chart's alert rules (`localhost:9090`), and the Sentinel Guard dashboard in Grafana (`localhost:3000`). More in [examples/quickstart](../../examples/quickstart/README.md).
+
+![The inbox's Overview: what waits, what ran, what was blocked or denied, the chain's health, each agent, and the activity](../handbook/images/screens/guard-overview.png)
 
 ### Or one container, driven with curl
 The same guard runs as a single process with an HTTP API: an agent asks before acting, a human approves, and the agent gets a single-use capability that the executor redeems.
@@ -268,9 +274,9 @@ On a fresh kind cluster (1 node, laptop), 3 replicas, through the API server ([r
 
 | | p50 | p99 |
 |---|---|---|
-| A human's change (the guard is never called) | 3.2 ms | 8.8 ms |
-| An agent's change that is waiting for approval | 2.4 ms | 6.0 ms |
-| An agent's change after approval (admitted once) | 24.7 ms | 40.8 ms |
+| A human's change (the guard is never called) | 2.5 ms | 6.1 ms |
+| An agent's change that is waiting for approval | 3.8 ms | 7.5 ms |
+| An agent's change after approval (admitted once) | 25.6 ms | 34.6 ms |
 
 The end-to-end suite (`scripts/guard-e2e.sh`, run in CI) passes 33 checks against a real API server:
 - agents wait while humans don't;

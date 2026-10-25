@@ -104,11 +104,26 @@ public class IncidentService {
         String target = (String) rem.get("target");
         String guardRequest = current.get("approval") instanceof Map<?, ?> a ? (String) a.get("request") : null;
 
-        // Record the decision in the guard first: if it refuses (expired, already decided, guard down),
-        // nothing is resumed and the incident keeps waiting. A rejection is recorded too, so that
-        // request can never be approved later. Escalations register nothing (nothing to execute).
+        // Record the decision in the guard first: if it refuses an approval (expired, already decided,
+        // guard down), nothing is resumed and the incident keeps waiting. A rejection is recorded too, so
+        // that request can never be approved later. Escalations register nothing (nothing to execute).
         if (guardRequest != null) {
-            guard.decide(guardRequest, approved, reviewer, note);
+            try {
+                guard.decide(guardRequest, approved, reviewer, note);
+            } catch (GuardClient.GuardException e) {
+                int code = e.status().value();
+                // A rejection needs nothing from the guard: if it no longer has the request (it expired, or
+                // a single-process guard restarted) or it was already decided, the incident still closes.
+                if (approved || (code != 404 && code != 409)) {
+                    if (approved && code == 404) {
+                        throw new GuardClient.GuardException(e.status(), "no longer has request " + guardRequest
+                                + " (it expired, or the guard restarted), so it can't be approved. Reject it to close"
+                                + " this incident; the next alert starts a new investigation.");
+                    }
+                    throw e;
+                }
+                log.info("closing incident {} on a rejection the guard couldn't record: {}", id, e.getMessage());
+            }
         }
         Map<String, Object> decision = new HashMap<>();
         decision.put("approved", approved);

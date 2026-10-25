@@ -123,9 +123,15 @@ def main() -> int:
 
     notices = wait("notifications", lambda: (lambda o: o if "Needs 2 different people" in o and "Approved by alice@example.com; needs 1 more" in o else None)(
         logs("notifications")), 30) or ""
-    check("refund-bot asks to refund" in notices and "http://localhost:8080/inbox/" in notices,
-          "a notification for each request that needs a person, linking to the inbox")
+    check("refund-bot asks to refund" in notices and f"{GUARD}/inbox/#ar-" in notices,
+          "a notification for each request that needs a person, linking straight to it in the inbox")
     check("Approved by alice@example.com; needs 1 more" in notices, "a notification when one of two has approved")
+
+    ov = httpx.get(f"{GUARD}/v1/overview", headers=ALICE).json()
+    agent_row = next((a for a in ov.get("agents", []) if a["agent"] == "refund-bot"), {})
+    check(ov["summary"]["outcomes"].get("executed", 0) >= 3 and agent_row.get("outcomes", {}).get("blocked", 0) >= 1
+          and agent_row.get("waiting") == ov["pending"] and (ov.get("chain") or {}).get("ok"),
+          f"the overview: {ov['summary']['outcomes'].get('executed')} executed, {ov['pending']} waiting, the chain verified")
 
     rep = httpx.get(f"{GUARD}/v1/audit/verify", headers=BOB).json()
     check(rep.get("ok") and rep.get("events", 0) > 0, f"audit chain OK: {rep.get('events')} events across {rep.get('requests')} requests")

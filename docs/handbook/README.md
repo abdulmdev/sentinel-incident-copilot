@@ -2,7 +2,7 @@
 
 The complete reference for Sentinel: what it is, how it's designed (high level and low level), why each decision was made, how it's tested, deployed and operated, and what happened in each phase of building it.
 
-> **Status:** current as of **Phase 16: Two people (2026-10-25)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
+> **Status:** current as of **Phase 17: The whole picture (2026-10-25)**. Every chapter is updated in the same change as the code it describes. See [Maintaining this handbook](#maintaining-this-handbook).
 
 ## How to read it
 
@@ -25,10 +25,10 @@ The complete reference for Sentinel: what it is, how it's designed (high level a
 - [`docs/Sentinel-Handbook.pdf`](../Sentinel-Handbook.pdf): A4, cover, contents, page numbers.
 - [`Sentinel-Handbook.html`](Sentinel-Handbook.html): self-contained, opens in any browser.
 
-Shorter companions: the [user guide](../USER-GUIDE.md), the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the sixteen [architecture decision records](../adr/).
+Shorter companions: the [user guide](../USER-GUIDE.md), the [system design summary](../DESIGN.md), the [demo script](../DEMO.md), and the seventeen [architecture decision records](../adr/).
 
 ## Figures
-The handbook has **79 diagrams and charts** (architecture, sequence, state, ER, deployment, flowcharts, data charts) and **17 screenshots of the running system** (console incl. the closed loop, Jaeger, Grafana, Prometheus targets and alerts, and the guard's approvals inbox and dashboard). Every figure is numbered and captioned.
+The handbook has **79 diagrams and charts** (architecture, sequence, state, ER, deployment, flowcharts, data charts) and **19 screenshots of the running system** (console incl. the closed loop, Jaeger, Grafana, Prometheus targets and alerts, and the guard's inbox, overview, request details and dashboard). Every figure is numbered and captioned.
 
 | Kind | Source (edit this) | Rendered to | How |
 |---|---|---|---|

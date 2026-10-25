@@ -107,8 +107,8 @@
       <p class="hook">No agent changes your cluster unless policy, or a human, approved that exact change, and then only once.</p>
       <p>Sentinel's safety core, extracted for coding agents with <code>kubectl</code>, CI and GitOps bots, and LangGraph or MCP agents. It needs no agent code changes, because it enforces at the Kubernetes API. Humans, CI and controllers are never sent to it, so a guard outage stops only agents.</p>
       <div class="stats">
-        <div class="stat"><b>40.8 ms</b><span>p99 for an approved agent change, admitted once (3 replicas, through the API server)</span></div>
-        <div class="stat"><b>6.0 ms</b><span>p99 for an agent change waiting for approval (a human's: 8.8 ms)</span></div>
+        <div class="stat"><b>34.6 ms</b><span>p99 for an approved agent change, admitted once (3 replicas, through the API server)</span></div>
+        <div class="stat"><b>7.5 ms</b><span>p99 for an agent change waiting for approval (a human's: 6.1 ms)</span></div>
         <div class="stat"><b>31 / 31</b><span>end-to-end checks on a real API server, incl. its write retries, the guard taken down and tampered evidence</span></div>
         <div class="stat"><b>11.5 MB</b><span>one Go binary, no database: state lives in the Kubernetes API</span></div>
       </div>
@@ -221,6 +221,7 @@
       <tr><td>14 · Governance</td><td>Signed evidence export verifiable offline, policy versions, guardian alerts on agent drift, EU AI Act / NIST AI RMF mapping, one-click Codespaces demo</td></tr>
       <tr><td>15 · Try it, ship it</td><td><code>docker compose up</code> with a live agent, an approvals inbox in the guard, a Grafana dashboard for the guard, signed charts and SDK packages on every release</td></tr>
       <tr><td>16 · Two people</td><td>Two-person approvals for the riskiest actions, approvers verified by OIDC at the guard, notifications to Slack; v2.0.0-alpha.3 released</td></tr>
+      <tr><td>17 · The whole picture</td><td>An Overview of every agent's actions and a details view for every request, with its signed audit trail; incidents can no longer get stuck</td></tr>
     </table>
   </section>
 

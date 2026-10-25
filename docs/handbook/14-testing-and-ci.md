@@ -1,14 +1,14 @@
 # 14 Testing and CI
 
-**324 automated tests** (measured 2026-10-25; 307 after Phase 15, 306 after Phase 14, 290 after Phase 13, 277 after Phase 12, 252 after Phase 11, 244 after Phase 10, 212 before it):
+**329 automated tests** (measured 2026-10-25; 324 after Phase 16, 307 after Phase 15, 306 after Phase 14, 290 after Phase 13, 277 after Phase 12, 252 after Phase 11, 244 after Phase 10, 212 before it):
 
 | Suite | Tests |
 |---|---|
 | SafeActionBench | 13 |
 | Python SDK + MCP proxy | 19 (against the real guard binary) |
 | TypeScript SDK | 6 (against the real guard binary) |
-| gateway | 93 (67 unit/slice + 26 integration) |
-| sentinel-guard (Go) | 68 (52 test functions + 16 subtests), run with the race detector |
+| gateway | 96 (69 unit/slice + 27 integration) |
+| sentinel-guard (Go) | 70 (54 test functions + 16 subtests), run with the race detector |
 | agent | 72 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
 | mcp-remediation | 17 |
 | eval scorer + runner | 14 |
@@ -25,7 +25,7 @@ Plus:
 - a **scripted live closed-loop scenario** (section 4);
 - **Sentinel Guard end to end** on a real API server: 33 checks, a load run and the guard taken down (section 4A);
 - **the guard walkthrough** (`scripts/guard-demo.sh`, what Codespaces runs): 13 assertions across 11 steps, against a real guard (Phase 14);
-- **the docker compose quickstart** (`examples/quickstart/check.py`): 28 checks against the running stack, including two-person approvals, notifications and the monitoring profile (Phases 15 and 16; section 4B).
+- **the docker compose quickstart** (`examples/quickstart/check.py`): 29 checks against the running stack, including two-person approvals, notifications, the overview and the monitoring profile (Phases 15 to 17; section 4B).
 
 ## 1. Strategy
 
@@ -65,10 +65,10 @@ uv run --project agent-service python evals/rca/run.py --check
 | Test | Proves |
 |---|---|
 | `GatewayApplicationTest.contextLoads` | Full context with no mocks (caught the missing RestClient starter) |
-| `IncidentControllerTest` (16) | 401 without a token; **tenant from the token, not the body**; payload equals the shared contract; reviewer = JWT subject; 403 without a tenant claim; agent 409 passthrough; validation; **agent outage → FAILED record**; decision recorded with the reviewer; list scoped to the tenant. Phase 11: **the decision is recorded in Sentinel Guard (on the agent's request, approver = JWT subject) before the agent resumes**; a rejection is recorded too; approved `escalate` touches the guard not at all; **a decision the guard refuses resumes nothing** (409 with the guard's reason); execution audited with the guard request, the capability's jti and the verification result (and the alert link released); a failed remediation is audited and keeps the alert linked |
+| `IncidentControllerTest` (18) | 401 without a token; **tenant from the token, not the body**; payload equals the shared contract; reviewer = JWT subject; 403 without a tenant claim; agent 409 passthrough; validation; **agent outage → FAILED record**; decision recorded with the reviewer; list scoped to the tenant. Phase 11: **the decision is recorded in Sentinel Guard (on the agent's request, approver = JWT subject) before the agent resumes**; a rejection is recorded too; approved `escalate` touches the guard not at all; **a decision the guard refuses resumes nothing** (409 with the guard's reason); execution audited with the guard request, the capability's jti and the verification result (and the alert link released); a failed remediation is audited and keeps the alert linked. Phase 17: **a rejection closes the incident even when the guard no longer has the request** (and releases its alert); an approval the guard no longer knows is refused with how to get unstuck |
 | `AlertServiceTest` (7) | New alert → incident dated at the alert's `startsAt`, tenant from the token (a `tenant_id` label is ignored), severity mapped, investigated in the background; re-fire → deduplicated; **a second rule on the same service joins the open incident without a new investigation**; missing/invalid `service` label skipped; resolution recorded; fingerprint fallback is a stable label hash |
 | `AlertSecurityTest` (9) | Real signed tokens: the gateway-issued integration token works on the webhook and its tenant is used; **an HS256-forged integration token → 401; a revoked one → 403**; anonymous → 401; **user token, a user token claiming `alerts:write` without the audience, and an agent tool token → 403**; the integration token can't read incidents or call `/mcp`; **a remediation capability is useless at the gateway** |
-| `ClosedLoopRepositoryIT` (9) | V6 on real Postgres as `sentinel_app`: **8 concurrent deliveries of one alert open exactly one incident (no spare records)**; **6 different rules tripping on one service concurrently share one incident**; other services and other tenants get their own; a finished incident releases the alert for a new one; the incident is reported resolved only when its *last* alert clears; a resolution arriving after the incident closed still reaches it (not older ones); timeline and time-to-mitigate mirrored; audit is tenant-scoped |
+| `ClosedLoopRepositoryIT` (10) | V6 on real Postgres as `sentinel_app`: **8 concurrent deliveries of one alert open exactly one incident (no spare records)**; **6 different rules tripping on one service concurrently share one incident**; other services and other tenants get their own; a finished incident releases the alert for a new one; the incident is reported resolved only when its *last* alert clears; a resolution arriving after the incident closed still reaches it (not older ones); timeline and time-to-mitigate mirrored; audit is tenant-scoped; **an incident that ended without releasing its links (marked failed) no longer catches alerts**: the alert opens a new incident, and another rule on the service correlates to the new one (Phase 17) |
 | `IncidentRepositoryIT` (2) | Lifecycle (proposed action preserved across updates), per-tenant listing, FAILED kept |
 | `TracePropagationTest` | Real `AgentClient` against a stub server receives W3C `traceparent`, **a verifiable 60-second agent-call token for the tenant**, **and** the tool token |
 | `KnowledgeControllerTest` (4) | Upload publishes with the token's tenant and key `tenant:docId`; Kafka failure → 503; search scoped; bad mode/k → 400 |
@@ -107,7 +107,7 @@ uv run --project agent-service python evals/rca/run.py --check
 | `test_auth.py` (8) | Gateway → agent: no token → 401; a token for the tenant → accepted; **another tenant's token → 403 in path and body**; tool-token audience, forged key, expired, and HS256 shared-secret tokens → 401; health and metrics open |
 | `test_postgres_checkpointer.py` (3) | Durability across processes (the approval lives in the guard, so it survives the restart too, and the incident resolves); **checkpoint RLS**: a request bound to another tenant reads nothing and can't write (`InsufficientPrivilege`), an unbound request reads nothing; tables FORCE RLS even for their owner |
 
-### sentinel-guard (68; `cd guard && go test -race ./...`)
+### sentinel-guard (70; `cd guard && go test -race ./...`)
 - **Engine** (`internal/guard/engine_test.go`):
   - an approval admits exactly once, a retry while pending reuses the request, a replay opens a new one;
   - the approval is bound to the exact change and target;
@@ -156,7 +156,9 @@ uv run --project agent-service python evals/rca/run.py --check
   - OIDC against a test issuer (discovery + JWKS, RS256): an approver by user and by group decide as themselves; a non-approver gets 403; an unverified email, another audience, an expired token, another issuer and `alg: none` get 401;
   - a delegate forwarding the person's token: refused without the guard's OIDC settings, refused when invalid or when the delegate's claim differs; recorded as the verified person via the delegate;
   - the approval webhook for a two-person action: the first `approve` becomes `spec.approvals` (the authenticated user and the note, the decision removed) with a warning; the same user again and a hand-written `spec.approvals` are refused; the second person's approval is the decision;
-  - notifications: two notices (asked, then one of two approved) with the right text, structured fields and inbox link; a 503 retried; `sent` counted.
+  - notifications: two notices (asked, then one of two approved) with the right text, structured fields and inbox link; a 503 retried; `sent` counted;
+  - **the overview** (Phase 17): only approvers, the admin token and auditors may read it; it counts what waits, unspent approvals, outcomes overall and per agent; the chain's health appears after the first self-verification.
+- **A fresh read before "pending"** (`engine_test.go`, Phase 17): with a store whose cached lookup still shows a request undecided while another replica has approved it, the next attempt is admitted at once. The test fails with the fresh read disabled.
 - **Benchmarks** (not counted as tests): `BenchmarkVerifyEvidence` (1,000 requests, 3,000 events: about 0.18 s; about 2.1 KB per request) and `BenchmarkSignHash` (about 26 µs), Apple M1 Pro.
 
 ### SafeActionBench (13; `bench/`: `uv run pytest`)
@@ -224,7 +226,7 @@ Each metric's definition, including the edge cases: wrong escalation isn't harmf
 | `deploy-config` | `helm lint` (both charts); **`promtool check rules`** (lab + guard) and **`promtool test rules`** (guardian alerts), and the PrometheusRule renders (Phase 14); the guard dashboard is valid JSON, every query names a guard series, and the chart renders it (Phase 15); `helm template \| kubeconform -strict` for defaults/kind/aws; **`check_chart_secrets.py`** (`--prod`: signing keys only in the gateway, no dev secret anywhere; kind: no signing material outside the gateway/web); `terraform fmt -check`, `init -backend=false`, `validate` | Validity + least privilege |
 | `bench` | `uv run --frozen pytest` in `bench/`: the data equals its source byte for byte; scoring, the reference guard, the MCP harness (exact parity, all 112 incidents) and `serve` over stdio; **the leaderboard page equals what the stored predictions render** | Tests + reproducibility |
 | `sdks` | Builds the guard once; the Python SDK + MCP proxy (`uv run --frozen pytest`) and the TypeScript SDK (`npm ci`, build, `node --test`) against it; then **`scripts/guard-demo.sh`**, the walkthrough Codespaces runs, which fails if any step doesn't behave as described (Phase 14); then the release packages build (`uv build`, `npm pack`; Phase 15) | Tests |
-| `quickstart` | `TICKET_EVERY=3 docker compose --profile monitoring up -d --build --wait` at the repository root, then `examples/quickstart/check.py --monitoring` (28 checks, section 4B); logs on failure; always `down -v` (Phase 15) | The one-command quickstart works |
+| `quickstart` | `TICKET_EVERY=3 docker compose --profile monitoring up -d --build --wait` at the repository root, then `examples/quickstart/check.py --monitoring` (29 checks, section 4B); logs on failure; always `down -v` (Phase 15) | The one-command quickstart works |
 | `guard` | `gofmt` check, `go vet`, `go test -race ./...`, both binaries build (`deploy-config` also lints the guard chart and validates it with kubeconform; the CRD itself is validated by the real API server in `guard-e2e`) | Tests |
 | `guard-e2e` (needs guard, deploy-config) | `scripts/guard-e2e.sh` with `LOAD=1 LOAD_N=100` on a fresh kind cluster (section 4A) | End to end on a real API server |
 | `kind-e2e` (needs the above) | kind cluster; `scripts/kind-up.sh`; seed knowledge; inject a fault; open an incident → expect `AWAITING_APPROVAL`; **approve → expect `RESOLVED`** (capability → remediation adapter → verification, in-cluster); **assert the console pod can't reach the agent or the remediation adapter** | End to end + NetworkPolicy |
@@ -323,14 +325,17 @@ Runs against `docker compose --profile monitoring up` at the repository root, wi
    - the denial with its note;
    - a notice for each request that needs a person, linking to the inbox;
    - a notice when one of two has approved.
-6. **The record (2):** the audit chain verifies, and the evidence bundle exports, counting the two-person approval.
+6. **The record (3):**
+   - the overview counts what ran and what waits, and shows the chain verified (Phase 17);
+   - the audit chain verifies;
+   - the evidence bundle exports, counting the two-person approval.
 7. **Monitoring (4):**
    - Prometheus loaded 8 alerts and 6 recording rules from the chart's file;
    - it scrapes per-agent outcomes;
    - `sentinel_guard_audit_chain_ok` is 1;
    - Grafana serves the `sentinel-guard` dashboard.
 
-Last run: 28/28, 2026-10-25 (Phase 16).
+Notices link to `/inbox/#<request id>` (Phase 17). Last run: 29/29, 2026-10-25 (Phase 17).
 
 ## 5. Adding tests: rules
 - New DB behavior → a Testcontainers IT that connects as `sentinel_app` (not the container superuser).

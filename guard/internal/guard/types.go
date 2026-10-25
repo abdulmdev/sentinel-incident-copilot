@@ -231,3 +231,9 @@ type Store interface {
 	RecordPolicy(ctx context.Context, p PolicyRecord) error
 	Policies(ctx context.Context) ([]PolicyRecord, error)
 }
+
+// Refresher is implemented by stores that read from a cache (Kubernetes: each replica's watch
+// cache, a few milliseconds behind). Refresh reads one request from the source of truth.
+type Refresher interface {
+	Refresh(ctx context.Context, id string) (*Request, error)
+}

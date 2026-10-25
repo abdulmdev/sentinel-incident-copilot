@@ -744,6 +744,53 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 
 ---
 
+## Phase 17: The whole picture
+**Goal:** let a person see what their agents are doing, and the full story of any one action, in one place; and remove the ways an incident could get stuck, all found by running the system as a newcomer would.
+
+**Built**
+- **An Overview in the inbox**, from `GET /v1/overview` (the evidence summary plus what's open now and the last self-verification):
+  - tiles: waiting for people (and the oldest wait), approved but not yet run, executed, blocked by policy, denied by people, the chain's health;
+  - a table per agent: attempts, needed a person, waiting now, approved, on policy, denied, blocked, executed, last seen;
+  - an activity feed that turns the signed events into sentences.
+- **A details view for every request:**
+  - the facts, the exact change and the guard's own observations;
+  - every approval and the decision, the capability and the policy version;
+  - the signed audit trail with hashes.
+  - It opens from any card, activity line or history row, and from `/inbox/#<request id>`, which notifications now link to.
+- **No stuck incidents** (gateway):
+  - a rejection closes the incident even when the guard no longer has the request (404) or has already settled it (409);
+  - an approval in that state is refused with how to get unstuck;
+  - before an alert is linked, links still active on an ended incident are released.
+- **A fresh read before "pending"** (guard): the engine re-reads a request the cache shows as undecided before answering "waiting for approval" (`Refresher`; a GET in the Kubernetes store).
+- **The console in the all-containers stack** (`deploy/docker-compose.yml`, committed just before this phase as `712ded2`).
+
+**Decisions** (ADR-0017):
+- **The overview is derived, not stored.** It comes from the same summary as the evidence bundle and the monitor's last verification, so it can't disagree with the record and costs no extra verification per poll.
+- **A rejection is always safe to apply locally;** an approval never is without the guard.
+- **Release stale links at linking time,** whatever path ended the incident, rather than trust every path to call `deactivate`.
+- **Pay one API read on "pending" answers** to make approvals count at once.
+
+**Bugs found and fixed**
+
+| Found | How | Fix |
+|---|---|---|
+| An incident stayed *Awaiting approval* forever when its guard request was gone (expired, or a single-process guard restarted), and its active alert links pulled every later alert on that service into it, so no new investigation started | Running the copilot in Docker: a fresh `bad_deploy` alert was "correlated" into an incident from the day before; rejecting it returned "Sentinel Guard: not found" | Rejections close the incident without the guard; stale links on ended incidents are released when the next alert is linked (both tested, IT on real Postgres) |
+| `guard-e2e` failed once in CI: the load generator's "approve, then retry at once" round was told "needs human approval" | The Phase 16 CI run (passed on rerun) | The fresh read before "pending"; a test with a lagging store fails without it |
+| The Overview's "Asked" column counted only requests that needed a person, so receipts on policy looked missing | The first screenshot | "Attempts" and "Needed a person" are separate columns |
+| A count of 98 gateway tests included 2 from a test class removed in Phase 11, whose old report was still in `target/` | Matching every report file to a source file | Counted from current classes only: 96 (69 + 27) |
+
+**Results** (2026-10-25):
+- **Guard e2e: 33/33** with the full load run (`LOAD_N=400`), the fresh read running on a real API server. Latency re-measured (chapter 17 §8):
+  - approved p99 34.6 ms;
+  - pending p99 7.5 ms (p50 3.8 ms; the extra read);
+  - human baseline 6.1 ms;
+  - approve-and-retry worst case 66.8 ms (it now always applies the approval).
+- **The copilot, live in Docker:** after the stale incident was cleared, a `bad_deploy` on checkout opened an incident from Alertmanager 33 s after the injection. The rollback proposal followed 8 s later, citing the deploy history, the error logs and the 2026-08-14 postmortem.
+- **Quickstart: 29/29**, including the overview and deep-linked notifications.
+- **329 automated tests:** gateway 93 → 96, Go 68 → 70.
+
+---
+
 ## Template for the next entry
 ```
 ## Phase N: <theme>

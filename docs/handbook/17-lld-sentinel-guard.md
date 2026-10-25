@@ -134,23 +134,28 @@ For agents outside Kubernetes, an approved request yields one ES256 JWT:
 It is issued once (`capability-issued` records the `jti`). The executor calls `POST /v1/capabilities/spend`, which verifies it (algorithm pinned, issuer, audience, expiry) and moves the request `Approved → Executed` only if the `jti` matches: single use, enforced by the store's compare-and-swap. The API's fingerprint is a digest of the proposed `change` map, so an approval for €42 doesn't cover €4,200 (unit test).
 
 ## 8. Measured
-All numbers from `scripts/guard-e2e.sh` with `LOAD=1` on a fresh kind cluster (1 node, Docker Desktop, Apple Silicon), 3 guard replicas, re-measured 2026-10-24 after Phase 14 (which adds a signed checkpoint to every event). Raw data: [`evals/guard/latency.json`](../../evals/guard/latency.json). Latency is measured by the client through the API server (TLS, the webhook call, the guard's work, the write), with `test/loadgen`.
+All numbers from `scripts/guard-e2e.sh` with `LOAD=1` on a fresh kind cluster (1 node, Docker Desktop, Apple Silicon), 3 guard replicas, re-measured 2026-10-25 after Phase 17, which adds a fresh read before a "pending" answer. The full Sentinel stack was running in Docker on the same laptop during this run. Raw data: [`evals/guard/latency.json`](../../evals/guard/latency.json). Latency is measured by the client through the API server (TLS, the webhook call, the guard's work, the write), with `test/loadgen`.
 
 | Scenario | n | p50 | p95 | p99 | max |
 |---|---|---|---|---|---|
-| Human scales a deployment (the guard is never called) | 400 | 3.2 ms | 5.6 ms | 8.8 ms | 35.7 ms |
-| Agent repeats a change that's pending (denied after a cache lookup) | 400 | 2.4 ms | 4.7 ms | 6.0 ms | 14.8 ms |
-| Agent's change after a human approved it (admitted once) | 100 | 24.7 ms | 31.9 ms | **40.8 ms** | 44.0 ms |
-| Worst case: approval and retry in the same instant (the decision is applied on the request path) | 100 | 28.5 ms | 37.0 ms | 45.6 ms | 56.6 ms |
+| Human scales a deployment (the guard is never called) | 400 | 2.5 ms | 4.0 ms | 6.1 ms | 9.2 ms |
+| Agent repeats a change that's pending (a cache lookup, then a fresh read of that request) | 400 | 3.8 ms | 5.6 ms | 7.5 ms | 13.6 ms |
+| Agent's change after a human approved it (admitted once) | 100 | 25.6 ms | 31.8 ms | **34.6 ms** | 42.9 ms |
+| Worst case: approval and retry in the same instant (the decision is applied on the request path) | 100 | 32.4 ms | 48.0 ms | 66.8 ms | 79.6 ms |
 
 ![Sentinel Guard: p99 latency through the API server](images/17-chart-guard-latency.png)
 
 *Figure 17.4: Sentinel Guard: p99 latency through the API server*
 
-- **What a pending check costs:** no more than no guard at all (2.4 vs 3.2 ms at p50), because it is served from the watch cache.
-- **The approved path** makes two writes: the chain head, and the request's state together with its event. p99 is 40.8 ms, under the 50 ms target.
-- **Run-to-run variation.** The Phase 10 run measured 42.9 ms on the approved path and 4.9 ms for the human baseline. The human path never calls the guard, so its rise to 8.8 ms here is the host: a laptop, with other work running during this run. The extra checkpoint signature costs about 26 µs (`BenchmarkSignHash`), which these numbers can't resolve. Read the table as "tens of milliseconds for an approved change, single digits otherwise".
-- **Safety under load:** every load round also asserts that an unapproved change is denied, that a different change doesn't ride on an approval, and that the same change after a revert needs a new approval. The chain verified after 615 events across 211 requests, **with no voids** (no lost races).
+- **What a pending check costs.** Since Phase 17, a request found pending in the watch cache is read once more from the API server before the guard answers, so an approval made a moment ago through another replica counts.
+  - That read is the cost: p50 3.8 ms against 2.4 ms in Phase 14, p99 7.5 against 6.0 ms. Still single digits, about one human-path latency.
+- **The approved path** makes two writes: the chain head, and the request's state together with its event. p99 is 34.6 ms, under the 50 ms target.
+- **The worst case got slower, and that's the point.** It's an approval and a retry in the same instant: p99 66.8 ms, against 45.6 ms.
+  - Before, such a retry could read a cache that hadn't seen the approval yet, and be told to wait (CI saw it once).
+  - Now it always finds the approval and applies it on the request path.
+  - A real person retries seconds later, on the approved path above.
+- **Run-to-run variation.** The approved path measured 42.9 ms (Phase 10), 40.8 ms (Phase 14) and 34.6 ms here; the human baseline 4.9, 8.8 and 6.1 ms. Neither path changed in the code: that spread is the laptop. Read the table as "tens of milliseconds for an approved change, single digits otherwise".
+- **Safety under load:** every load round also asserts that an unapproved change is denied, that a different change doesn't ride on an approval, and that the same change after a revert needs a new approval. The chain verified after 630 events across 213 requests, **with no voids** (no lost races).
 - **Guard down:** humans' changes still go through and agents' changes are refused. After scaling back up from zero, the guard answered again within **2 s** (1 s in the Phase 10 run).
 - **The end-to-end suite:** 33 checks, all passing (chapter 14; the 2 added in Phase 16 cover two-person approval). The 6 added in Phase 14 cover policy versions, the signed head, offline verification of the export, tamper detection, every replica's self-verification, and a later export extending an archived one.
 
@@ -312,4 +317,37 @@ The middleware order is admin token, person, delegate. `decide` takes the decide
 - `Observe` runs in the event hook. It turns `requested` (still Pending), `approval-added` and an undecided `expired` into a `Notice`.
 - A single worker posts from a 256-slot queue, with a 5 s timeout and two retries on errors and 5xx. A full queue drops, and counts the drop.
 - In Kubernetes the hook runs on the replica that chained the event, so each notice is sent once.
+
+## 14. The whole picture, and no stuck incidents (Phase 17)
+
+![The inbox's Overview in the quickstart: what waits and for how long, what ran, what was blocked or denied, the chain's health, each agent's record, and the activity as sentences](images/screens/guard-overview.png)
+
+*Figure 17.10: The inbox's Overview in the quickstart: what waits and for how long, what ran, what was blocked or denied, the chain's health, each agent's record, and the activity as sentences*
+
+**`GET /v1/overview`** (`server.go`):
+- Lists the requests once and reuses `guard.Summarize`, the evidence bundle's own summary, for outcomes overall and per agent.
+- Adds what is open now: pending, the oldest wait, unspent approvals, and each agent's waiting count and last request.
+- `chain` is the guardian monitor's last self-verification, kept in an `atomic.Pointer`, so the inbox can poll every 2 seconds without re-verifying the chain.
+
+**The inbox** has three tabs:
+- *Overview*: the tiles, the agents table, and the activity feed. The feed takes the 30 newest audit events across requests and phrases each from its event type and actor, for example "policy allowed refund-bot to send-receipt on order-1050".
+- *Waiting for you*: the cards, as before.
+- *History*: recent outcomes, verification and the evidence download.
+
+A **details view** (a `<dialog>`) opens from any card, activity line or history row, and from `/inbox/#<request id>`, which notifications now link to. It is built from the requests already fetched:
+- the facts: agent, when, why, risk, autonomy, reasons, required and given approvals, the decision, expiry, execution, capability and policy version;
+- the exact change and the guard's own precondition observations;
+- the signed audit trail: sequence, event, time, actor, detail and hash prefix.
+
+![A request's details: a two-person closure that Alice has approved, with the exact change and the signed audit trail](images/screens/guard-request.png)
+
+*Figure 17.11: A request's details: a two-person closure that Alice has approved, with the exact change and the signed audit trail*
+
+**A fresh read before "pending"** (`engine.go` `useExisting`; `store.Kube.Refresh`):
+- When a request found through the cache is Pending with no decision, the engine reads that one request again through the `Refresher` interface before answering.
+- The Kubernetes store implements it as a GET to the API server; it keeps its own newer write if it has one.
+- So an approval made through another replica a moment ago is applied, not answered with "waiting".
+- The memory store reads its own state and doesn't implement it.
+
+**The gateway side** (chapter 03 §decision and §alert linking): a rejection closes the incident even when the guard no longer has the request; stale alert links on ended incidents are released before an alert is linked.
 

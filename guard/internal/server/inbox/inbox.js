@@ -14,6 +14,7 @@ let name = store.get("sessionStorage", "sentinel-guard-name");
 let role = store.get("sessionStorage", "sentinel-guard-role");
 let timer = null;
 const busy = new Set(); // requests with a decision in flight
+let requestsById = new Map(); // the latest list, for the details view
 
 function el(tag, attrs = {}, text) {
   const node = document.createElement(tag);
@@ -100,8 +101,10 @@ function card(r) {
     checks.append(li);
   }
 
-  node.querySelector(".meta").textContent =
-    `${r.agent} asked ${ago(r.createdAt)} · request ${r.id} · policy ${String(r.policyVersion || "").slice(0, 12) || "n/a"}`;
+  const meta = node.querySelector(".meta");
+  meta.textContent =
+    `${r.agent} asked ${ago(r.createdAt)} · request ${r.id} · policy ${String(r.policyVersion || "").slice(0, 12) || "n/a"} · `;
+  meta.append(detailsButton(r.id, "details"));
 
   const form = node.querySelector(".decide");
   const approve = form.querySelector("button.primary");
@@ -175,7 +178,7 @@ function render(requests) {
     tr.append(
       el("td", {}, ago(r.executedAt || r.decidedAt || r.createdAt)),
       el("td", {}, r.agent),
-      el("td", {}, r.action),
+      cell(detailsButton(r.id, r.action)),
       el("td", {}, targetText(r.target)),
       el("td", { class: `outcome ${r.phase}` }, r.phase),
       el("td", {}, deciders(r)),
@@ -183,6 +186,169 @@ function render(requests) {
     return tr;
   }));
   $("recent-empty").hidden = done.length > 0;
+}
+
+function cell(child, attrs = {}) {
+  const td = el("td", attrs);
+  td.append(child);
+  return td;
+}
+
+function detailsButton(id, label) {
+  const b = el("button", { type: "button", class: "link" }, label);
+  b.addEventListener("click", () => openDetail(id));
+  return b;
+}
+
+// What each audit event means, for people.
+const VERBS = {
+  requested: "asked to",
+  blocked: "was blocked from",
+  "approval-added": "gave one approval for",
+  approved: "approved",
+  denied: "denied",
+  "capability-issued": "received the capability for",
+  executed: "executed",
+  readmitted: "saw a retry of",
+  expired: "expired:",
+};
+
+function sentence(ev, r) {
+  const what = `${r.action} on ${targetText(r.target)}`;
+  if (ev.type === "approved" && String(ev.actor).startsWith("policy:")) return `policy allowed ${r.agent} to ${what}`;
+  if (ev.type === "expired") return `${what} expired with ${r.decision ? "no execution" : "nobody deciding"}`;
+  if (ev.type === "blocked") return `${r.agent} was blocked from ${what}`;
+  if (ev.type === "executed") return `${what} ran once (${ev.actor})`;
+  return `${ev.actor} ${VERBS[ev.type] || ev.type} ${what}`;
+}
+
+function tile(label, value, note = "", tone = "") {
+  const t = el("div", { class: `tile ${tone}` });
+  t.append(el("span", { class: "tile-label" }, label), el("strong", { class: "tile-value" }, String(value)));
+  if (note) t.append(el("span", { class: "tile-note" }, note));
+  return t;
+}
+
+function duration(seconds) {
+  if (!seconds) return "";
+  if (seconds < 90) return `${Math.round(seconds)}s`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min`;
+  return `${Math.round(seconds / 3600)} h`;
+}
+
+function renderOverview(ov, requests) {
+  const o = (ov.summary && ov.summary.outcomes) || {};
+  const chain = ov.chain;
+  $("tiles").replaceChildren(
+    tile("Waiting for people", ov.pending, ov.pending ? `oldest ${duration(ov.oldestPendingSeconds)}` : "nothing waiting", ov.pending ? "warn" : ""),
+    tile("Approved, not yet run", ov.approvedUnspent, "single-use, until they expire"),
+    tile("Executed", o.executed || 0, `${o.approved || 0} approved by people · ${o.auto_approved || 0} on policy`),
+    tile("Blocked by policy", o.blocked || 0, "can never be approved", (o.blocked || 0) ? "bad" : ""),
+    tile("Denied by people", o.denied || 0, `${(ov.summary && ov.summary.expiredUndecided) || 0} expired with nobody deciding`),
+    chain
+      ? tile("Audit chain", chain.ok ? "verified" : "BROKEN", `every signature, ${chain.events} events, as of ${ago(chain.at)}`, chain.ok ? "ok" : "bad")
+      : tile("Audit chain", "not checked yet", "the guard verifies it every few minutes"),
+  );
+
+  const agents = ov.agents || [];
+  $("agents").replaceChildren(...agents.map((a) => {
+    const n = (k) => String(a.outcomes[k] || 0);
+    const tr = el("tr");
+    const attempts = (a.outcomes.proposed || 0) + (a.outcomes.auto_approved || 0) + (a.outcomes.blocked || 0);
+    tr.append(el("td", {}, a.agent), el("td", { class: "num" }, String(attempts)), el("td", { class: "num" }, n("proposed")),
+      el("td", { class: `num${a.waiting ? " warn" : ""}` }, String(a.waiting)), el("td", { class: "num" }, n("approved")),
+      el("td", { class: "num" }, n("auto_approved")), el("td", { class: "num" }, n("denied")),
+      el("td", { class: "num" }, n("blocked")), el("td", { class: "num" }, n("executed")), el("td", {}, ago(a.lastSeen)));
+    return tr;
+  }));
+  $("agents-empty").hidden = agents.length > 0;
+
+  const events = [];
+  for (const r of requests) for (const ev of r.audit || []) events.push({ ev, r });
+  events.sort((a, b) => b.ev.seq - a.ev.seq);
+  $("activity").replaceChildren(...events.slice(0, 30).map(({ ev, r }) => {
+    const li = el("li", { class: `ev ${ev.type}` });
+    li.append(el("span", { class: "when muted" }, ago(ev.at)), el("span", {}, sentence(ev, r)));
+    if (ev.detail && ev.type !== "capability-issued") li.append(el("span", { class: "muted" }, ` · ${ev.detail}`));
+    li.append(el("span", { class: "spacer" }), detailsButton(r.id, "details"));
+    return li;
+  }));
+  $("activity-empty").hidden = events.length > 0;
+}
+
+function row(dl, label, value) {
+  if (value === undefined || value === null || value === "") return;
+  dl.append(el("dt", {}, label), el("dd", {}, String(value)));
+}
+
+function openDetail(id) {
+  const r = requestsById.get(id);
+  if (!r) { setStatus(`Request ${id} is not in this guard's record.`, true); return; }
+  $("detail-title").textContent = `${r.action} on ${targetText(r.target)}`;
+  const body = $("detail-body");
+  const phase = el("p", {});
+  phase.append(el("span", { class: `outcome ${r.phase}` }, r.phase), el("span", { class: "muted" }, ` · request ${r.id}`));
+
+  const facts = el("dl", { class: "facts" });
+  row(facts, "Agent", r.agent);
+  row(facts, "Asked", `${new Date(r.createdAt).toLocaleString()} (${ago(r.createdAt)})`);
+  row(facts, "Why", r.intent);
+  row(facts, "Risk", r.risk);
+  row(facts, "Autonomy", r.autonomy);
+  row(facts, "Reasons", (r.reasons || []).join("; "));
+  row(facts, "Needs", (r.requiredApprovals || 0) > 1 ? `${r.requiredApprovals} different people` : "");
+  for (const [i, a] of (r.approvals || []).entries()) {
+    row(facts, `Approval ${i + 1}`, `${a.by}${a.via ? ` via ${a.via}` : ""}, ${ago(a.at)}${a.note ? `: “${a.note}”` : ""}`);
+  }
+  if (r.decision) {
+    row(facts, "Decision", `${r.decision} by ${r.decidedBy}${r.decidedVia ? ` via ${r.decidedVia}` : ""}${r.decidedAt ? `, ${ago(r.decidedAt)}` : ""}`);
+    row(facts, "Note", r.decisionNote);
+  }
+  row(facts, r.phase === "Pending" || r.phase === "Approved" ? "Expires" : "", r.phase === "Pending" || r.phase === "Approved" ? until(r.expiresAt) : "");
+  row(facts, "Executed", r.executedAt ? new Date(r.executedAt).toLocaleString() : "");
+  row(facts, "Capability", r.capabilityJti);
+  row(facts, "Policy version", r.policyVersion);
+
+  const parts = [phase, facts];
+  const entries = Object.entries(r.change || {}).sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length) {
+    const change = el("dl", { class: "change" });
+    for (const [k, v] of entries) change.append(el("dt", {}, k), el("dd", {}, v));
+    parts.push(el("h3", {}, "The exact change"), change);
+  }
+  if ((r.preconditions || []).length) {
+    const ul = el("ul", { class: "checks" });
+    for (const c of r.preconditions) ul.append(el("li", { class: c.status }, `${c.name}: ${c.status}${c.value ? ` (${c.value})` : ""}${c.error ? `: ${c.error}` : ""}`));
+    parts.push(el("h3", {}, "What the guard observed itself"), ul);
+  }
+  const trail = el("table", { class: "trail" });
+  const head = el("tr");
+  for (const h of ["#", "Event", "When", "By", "Detail", "Hash"]) head.append(el("th", {}, h));
+  trail.append(head);
+  for (const ev of r.audit || []) {
+    const tr = el("tr");
+    tr.append(el("td", {}, String(ev.seq)), el("td", {}, ev.type), el("td", {}, new Date(ev.at).toLocaleTimeString()),
+      el("td", {}, ev.actor), el("td", {}, ev.detail || ""), el("td", { class: "hash" }, String(ev.hash).slice(0, 12)));
+    trail.append(tr);
+  }
+  const wrap = el("div", { class: "table-wrap" });
+  wrap.append(trail);
+  parts.push(el("h3", {}, "Signed audit trail"), wrap,
+    el("p", { class: "muted" }, "Each event is signed by the guard and linked to the one before it. Verify the whole chain from History."));
+  body.replaceChildren(...parts);
+  if (location.hash !== `#${id}`) history.replaceState(null, "", `#${id}`);
+  if (!$("detail").open) $("detail").showModal();
+}
+
+function closeDetail() {
+  if ($("detail").open) $("detail").close();
+  if (location.hash) history.replaceState(null, "", location.pathname);
+}
+
+function showTab(name) {
+  for (const b of document.querySelectorAll(".tab")) b.setAttribute("aria-pressed", String(b.dataset.tab === name));
+  for (const p of document.querySelectorAll(".tabpanel")) p.hidden = p.id !== `tab-${name}`;
+  store.set("sessionStorage", "sentinel-guard-tab", name);
 }
 
 function deciders(r) {
@@ -194,10 +360,15 @@ function deciders(r) {
 async function refresh() {
   if (!token) return;
   try {
-    const res = await api("/v1/actions");
+    const [res, ovRes] = await Promise.all([api("/v1/actions"), api("/v1/overview")]);
     if (!res.ok) { setStatus(`The guard answered ${res.status}.`, true); return; }
     const body = await res.json();
-    render(body.requests || []);
+    const requests = body.requests || [];
+    requestsById = new Map(requests.map((r) => [r.id, r]));
+    render(requests);
+    if (ovRes.ok) renderOverview(await ovRes.json(), requests);
+    const wanted = location.hash.slice(1);
+    if (wanted && !$("detail").open && requestsById.has(wanted)) openDetail(wanted);
     if ($("status").classList.contains("bad") || !$("status").textContent) setStatus(`Up to date · ${new Date().toLocaleTimeString()}`);
   } catch (err) {
     if (err.message !== "unauthorized") setStatus(`Could not reach the guard: ${err.message}`, true);
@@ -303,5 +474,11 @@ document.addEventListener("DOMContentLoaded", () => {
   $("sign-out").addEventListener("click", () => signOut());
   $("verify").addEventListener("click", verify);
   $("export").addEventListener("click", exportEvidence);
+  for (const b of document.querySelectorAll(".tab")) b.addEventListener("click", () => showTab(b.dataset.tab));
+  $("detail-close").addEventListener("click", closeDetail);
+  $("detail").addEventListener("close", () => { if (location.hash) history.replaceState(null, "", location.pathname); });
+  window.addEventListener("hashchange", () => { const id = location.hash.slice(1); if (id && requestsById.has(id)) openDetail(id); });
+  // A notification's link (…/inbox/#<request>) opens on that request; otherwise the last tab used.
+  showTab(location.hash ? "inbox" : store.get("sessionStorage", "sentinel-guard-tab") || "overview");
   show();
 });

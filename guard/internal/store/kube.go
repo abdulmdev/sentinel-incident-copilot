@@ -242,6 +242,19 @@ func (k *Kube) Get(ctx context.Context, id string) (*guard.Request, error) {
 	return FromObject(obj)
 }
 
+// Refresh reads a request from the API server itself, bypassing this replica's watch cache: for
+// answers that must not lag a decision someone just made through another replica.
+func (k *Kube) Refresh(ctx context.Context, id string) (*guard.Request, error) {
+	obj, err := k.res().Get(ctx, id, metav1.GetOptions{})
+	if err != nil {
+		return nil, wrap(err, "request "+id)
+	}
+	if own := k.cached(id); own != nil && auditLen(own) > auditLen(obj) {
+		obj = own // our own newer write
+	}
+	return FromObject(obj)
+}
+
 func (k *Kube) fromObjects(items []*unstructured.Unstructured) ([]*guard.Request, error) {
 	out := make([]*guard.Request, 0, len(items))
 	for _, item := range items {

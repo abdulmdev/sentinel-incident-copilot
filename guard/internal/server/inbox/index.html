@@ -35,14 +35,34 @@
   <div id="app" hidden>
     <p id="status" class="status" role="status" aria-live="polite"></p>
 
-    <section>
-      <h2>Waiting for you <span id="pending-count" class="count">0</span></h2>
+    <nav class="tabs" aria-label="Views">
+      <button type="button" class="tab" data-tab="overview" aria-pressed="true">Overview</button>
+      <button type="button" class="tab" data-tab="inbox" aria-pressed="false">Waiting for you <span id="pending-count" class="count">0</span></button>
+      <button type="button" class="tab" data-tab="history" aria-pressed="false">History</button>
+    </nav>
+
+    <section id="tab-overview" class="tabpanel">
+      <div id="tiles" class="tiles"></div>
+      <h2>Agents</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Agent</th><th class="num">Attempts</th><th class="num">Needed a person</th><th class="num">Waiting now</th><th class="num">Approved</th>
+            <th class="num">On policy</th><th class="num">Denied</th><th class="num">Blocked</th><th class="num">Executed</th><th>Last seen</th></tr></thead>
+          <tbody id="agents"></tbody>
+        </table>
+      </div>
+      <p id="agents-empty" class="empty">No agent has asked for anything yet.</p>
+      <h2>Activity</h2>
+      <ol id="activity" class="activity"></ol>
+      <p id="activity-empty" class="empty">Nothing has happened yet.</p>
+    </section>
+
+    <section id="tab-inbox" class="tabpanel" hidden>
       <div id="pending" class="list"></div>
       <p id="pending-empty" class="empty">Nothing is waiting. Agents' requests that need a person appear here as they arrive.</p>
     </section>
 
-    <section>
-      <h2>Recent</h2>
+    <section id="tab-history" class="tabpanel" hidden>
       <div class="table-wrap">
         <table>
           <thead><tr><th>When</th><th>Agent</th><th>Action</th><th>Target</th><th>Outcome</th><th>Decided by</th></tr></thead>
@@ -50,19 +70,28 @@
         </table>
       </div>
       <p id="recent-empty" class="empty">No decisions yet.</p>
-    </section>
 
-    <section class="card">
-      <h2>Audit trail</h2>
-      <p class="muted">Every request, decision and execution is a signed, hash-chained event. Verify the chain here, or
-        download the evidence bundle and check it anywhere with <code>kubectl sentinel audit verify --bundle</code>.</p>
-      <div class="row">
-        <button id="verify" type="button">Verify the chain</button>
-        <button id="export" type="button">Download evidence</button>
-      </div>
-      <pre id="audit" class="audit" hidden></pre>
+      <section class="card">
+        <h2>Audit trail</h2>
+        <p class="muted">Every request, decision and execution is a signed, hash-chained event. Verify the chain here, or
+          download the evidence bundle and check it anywhere with <code>kubectl sentinel audit verify --bundle</code>.</p>
+        <div class="row">
+          <button id="verify" type="button">Verify the chain</button>
+          <button id="export" type="button">Download evidence</button>
+        </div>
+        <pre id="audit" class="audit" hidden></pre>
+      </section>
     </section>
   </div>
+
+  <dialog id="detail" aria-labelledby="detail-title">
+    <div class="detail-head">
+      <h2 id="detail-title"></h2>
+      <span class="spacer"></span>
+      <button id="detail-close" type="button" class="link">close</button>
+    </div>
+    <div id="detail-body"></div>
+  </dialog>
 </main>
 
 <template id="request-card">

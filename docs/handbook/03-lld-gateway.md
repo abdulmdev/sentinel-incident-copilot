@@ -163,7 +163,7 @@ Returns the `tenant_id` claim; a missing or blank claim throws `AccessDeniedExce
 *Figure 3.6: Decision: recorded in Sentinel Guard before the agent resumes; audit when something executed; release alerts when final*
 
 1. `agent.get(tenant, id)` → the proposed `rca.remediation.{action, target}` and `approval.request`: the Sentinel Guard request the agent registered for exactly that proposal (none for `escalate`). What is approved is what the human saw, read from the agent's checkpoint, not from the request.
-2. If there is a guard request → `guard.decide(request, approved, reviewer, note)` (Phase 11). The gateway records the decision **as a delegate**: the guard stores the reviewer as the approver, via the gateway. Rejections are recorded too, so that request can never be approved later. If the guard refuses (expired, already decided, unreachable), a `GuardException` maps to that status (409/403/503) and **nothing is resumed**.
+2. If there is a guard request → `guard.decide(request, approved, reviewer, note)` (Phase 11). The gateway records the decision **as a delegate**: the guard stores the reviewer as the approver, via the gateway. Rejections are recorded too, so that request can never be approved later. If the guard refuses an **approval** (expired, already decided, unreachable), a `GuardException` maps to that status (409/403/503) and **nothing is resumed**. When the guard no longer has the request (404), the message says to reject it instead. A **rejection** the guard answers with 404 or 409 (the request is gone, expired or already decided) still closes the incident (Phase 17): a rejection runs nothing, so it needs nothing from the guard. Otherwise an incident whose request a single-process guard lost on restart could never be closed.
 3. `agent.decide(tenant, id, {approved, reviewer, note}, toolToken)`. No authority to execute travels here: the agent collects its single-use capability from the guard. This call spans execution and verification: up to about a minute, within the 120 s read timeout.
 4. `incidents.update(tenant, id, view, reviewer)`, which mirrors status, execution, verification, timeline and `time_to_mitigate_s`.
 5. If the view has `execution` → `remediation_audit` row `{action, target, approved_by, capability_jti, guard_request, executed, verified, outcome, error}` (the jti comes from the execution result).
@@ -224,9 +224,10 @@ Per alert:
 
 - **`link`**, in one transaction (RLS-bound):
   1. `pg_advisory_xact_lock(hashtext(tenant/service))`;
-  2. `UPDATE … SET fire_count+1, last_seen WHERE fingerprint AND active RETURNING incident_id` → `DEDUPLICATED`;
-  3. otherwise an active link of the same service (joined with `incidents.service`) → insert a link to *that* incident → `CORRELATED`;
-  4. otherwise create the incident **inside the same transaction** (the `TransactionTemplate` joins) and insert its link → `OPENED`.
+  2. release any link still active on an incident that has ended (`RESOLVED`, `CLOSED_NO_ACTION`, `FAILED`) by a path that didn't call `deactivate`, for example `markFailed` (Phase 17). Without this, a stale link captured every later alert on its service;
+  3. `UPDATE … SET fire_count+1, last_seen WHERE fingerprint AND active RETURNING incident_id` → `DEDUPLICATED`;
+  4. otherwise an active link of the same service (joined with `incidents.service`) → insert a link to *that* incident → `CORRELATED`;
+  5. otherwise create the incident **inside the same transaction** (the `TransactionTemplate` joins) and insert its link → `OPENED`.
 
   Concurrency tests on real Postgres show:
   - 8 parallel deliveries of one alert → 1 incident;

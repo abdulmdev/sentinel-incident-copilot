@@ -124,6 +124,19 @@ class ClosedLoopRepositoryIT {
     }
 
     @Test
+    void anIncidentThatEndedElsewhereNoLongerCatchesAlerts() {
+        var first = fire("acme", "stale", "fp-stale");
+        incidents.markFailed("acme", first.incidentId()); // ended without its links being released
+
+        var again = fire("acme", "stale", "fp-stale");
+        assertThat(again.outcome()).isEqualTo(AlertLinkRepository.Outcome.OPENED);
+        assertThat(again.incidentId()).isNotEqualTo(first.incidentId());
+        var sibling = fire("acme", "stale", "fp-stale-other-rule");
+        assertThat(sibling.outcome()).isEqualTo(AlertLinkRepository.Outcome.CORRELATED);
+        assertThat(sibling.incidentId()).isEqualTo(again.incidentId());
+    }
+
+    @Test
     void sameFingerprintInAnotherTenantIsIndependentAndInvisible() {
         var acme = fire("acme", "shared", "fp-shared");
         var globex = fire("globex", "shared", "fp-shared");
