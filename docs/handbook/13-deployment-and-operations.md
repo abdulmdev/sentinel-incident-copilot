@@ -278,7 +278,12 @@ Install: `helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-gu
 | `SENTINEL_GUARD_ISSUER` | `sentinel-guard` | `iss` of capabilities |
 | `SENTINEL_GUARD_VERIFY_INTERVAL` | `5m` | How often each replica verifies the whole audit chain (`sentinel_guard_audit_chain_ok`; Phase 14) |
 | `SENTINEL_GUARD_AGENT_TOKENS` | generated `demo-agent` token (printed once) | memory mode: `name=token,…` for agents |
-| `SENTINEL_GUARD_ADMIN_TOKEN` | generated (printed once) | memory mode: the approver token for HTTP approvals |
+| `SENTINEL_GUARD_ADMIN_TOKEN` | generated (printed once), unless approver tokens are set | memory mode: a shared approver token for HTTP approvals; decisions record the name given in the body |
+| `SENTINEL_GUARD_APPROVER_TOKENS` | none | memory mode: `person=token,…`, a token per person; each decision is recorded as that person (Phase 16) |
+| `SENTINEL_GUARD_OIDC_ISSUER`, `SENTINEL_GUARD_OIDC_AUDIENCE` | none | Verify people's own OIDC tokens at the guard: HTTP decisions by the policy's `approvers`, and person tokens a delegate forwards (`X-Sentinel-Person-Token`). The audience is required with the issuer (Phase 16) |
+| `SENTINEL_GUARD_OIDC_USERNAME_CLAIM`, `SENTINEL_GUARD_OIDC_GROUPS_CLAIM` | `email`, `groups` | The claims naming the person and their groups. With `email`, a token whose `email_verified` is false is refused |
+| `SENTINEL_GUARD_NOTIFY_URL` | none | A webhook told when a request needs a person, when an approval leaves it needing more, and when one expires undecided (Slack, Discord, or any JSON reader; Phase 16) |
+| `SENTINEL_GUARD_PUBLIC_URL` | none | The guard's address for people, linked from notifications (`<url>/inbox/`). Without it, notifications give the `kubectl sentinel approve` command |
 | `KUBERNETES_SERVICE_HOST` | set by Kubernetes | Only used to pick the default mode |
 | `SENTINEL_GUARD_NAMESPACE` | `sentinel-system` | kubectl plugin: where the guard runs (or `--guard-namespace`) |
 
@@ -288,7 +293,9 @@ Flags without a variable: `-version`, and `-healthcheck` (Phase 15): probe `http
 | Value | Default | Purpose |
 |---|---|---|
 | `agents.groups`, `agents.users` | `[system:serviceaccounts:agents]`, `[]` | Who is an agent: rendered into the webhook's `matchConditions` **and** the policy, so the two can't drift |
-| `approvers.users`, `approvers.groups` | `[]` | RoleBinding to `sentinel-guard-approver` in the release namespace |
+| `approvers.users`, `approvers.groups` | `[]` | RoleBinding to `sentinel-guard-approver` in the release namespace, and the policy's `approvers` (who may decide over HTTP with an OIDC token; Phase 16) |
+| `oidc.issuer`, `oidc.audience`, `oidc.usernameClaim`, `oidc.groupsClaim` | empty | Verify people's OIDC tokens at the guard (the environment variables above); `audience` is required with `issuer` (Phase 16) |
+| `notify.url`, `notify.existingSecret`, `notify.key`, `notify.publicURL` | empty, empty, `url`, empty | The notification webhook, preferably from a Secret, and the link it gives people (Phase 16) |
 | `policy` | see `values.yaml` | The policy (chapter 17 §2; user guide "Policy"); a change rolls the pods (checksum annotation) |
 | `replicas` | 3 | Spread across zones and nodes (topology spread), `maxUnavailable: 1` PDB |
 | `webhook.timeoutSeconds`, `webhook.guardCreate`, `webhook.extraRules` | 5, false, `[]` | Webhook timeout; also guard agents' creates; more resources to guard |
@@ -362,12 +369,13 @@ Unknown keys and modes are rejected at start.
 
 | Service | Image | Notes |
 |---|---|---|
-| `guard` | built from `guard/` (`sentinel-guard:quickstart`) | memory mode, `examples/walkthrough/policy.yaml`, verify interval 30 s; health check `-healthcheck`; `127.0.0.1:${GUARD_PORT:-8080}` |
+| `guard` | built from `guard/` (`sentinel-guard:quickstart`) | memory mode, `examples/quickstart/policy.yaml`, approver tokens for Alice and Bob (no admin token), notifications to `notifications`, verify interval 30 s; health check `-healthcheck`; `127.0.0.1:${GUARD_PORT:-8080}` |
+| `notifications` | `python:3.13-slim` | `examples/quickstart/notify_sink.py`: prints each notice's text, as Slack would show it (Phase 16) |
 | `agent` | built from `examples/quickstart/agent.Dockerfile` (the SDK from `sdk/python`; `agent.Dockerfile.dockerignore` keeps the context to four paths) | waits for a healthy guard; `restart: unless-stopped`; runs as 65532 |
 | `prometheus` (profile `monitoring`) | `prom/prometheus:v3.5.0` | scrapes `guard:9090` every 5 s; mounts the chart's `alerts/guard-alerts.yaml`; `127.0.0.1:${PROMETHEUS_PORT:-9090}` |
 | `grafana` (profile `monitoring`) | `grafana/grafana:12.1.0` | anonymous viewer, no login form, analytics off; opens on the chart's `dashboards/sentinel-guard.json`; `127.0.0.1:${GRAFANA_PORT:-3000}` |
 
-Variables: `APPROVER_TOKEN` (`approve-me`), `AGENT_TOKEN` (`agent-demo-token`), `TICKET_EVERY` (20 s), and the three ports.
+Variables: `ALICE_TOKEN` (`alice-demo`) and `BOB_TOKEN` (`bob-demo`), the two approvers' personal tokens (Phase 16; Phase 15 used one shared `APPROVER_TOKEN`); `AGENT_TOKEN` (`agent-demo-token`); `TICKET_EVERY` (20 s); and the three ports. The guard uses `examples/quickstart/policy.yaml`: the walkthrough's policy plus `close-account` with `approvals: 2`. A `notifications` service (`python:3.13-slim` running `notify_sink.py`) receives the guard's notices and prints them.
 
 Measured on an M1 Pro with Docker Desktop:
 - The first `docker compose --profile monitoring up -d --build --wait` took 1 min 53 s: building both images and pulling Prometheus and Grafana. Docker's build cache may already have held base layers from earlier work on this machine, so a truly fresh machine takes longer.

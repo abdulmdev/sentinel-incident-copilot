@@ -7,7 +7,8 @@ import (
 )
 
 // The approvals inbox: a small page for deciding on agents' requests in a browser, for
-// single-process mode (docker run, docker compose), where people approve with the admin token.
+// single-process mode (docker run, docker compose), where people approve with their own approver
+// token (or the shared admin token).
 // In Kubernetes people approve through the API server (kubectl sentinel approve), so the inbox
 // is not served there. The page holds no state of its own: it calls the same HTTP API.
 //
@@ -20,7 +21,7 @@ const inboxCSP = "default-src 'none'; script-src 'self'; style-src 'self'; conne
 	"base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 func (s *Server) mountInbox(mux *http.ServeMux) {
-	if s.AdminToken == "" {
+	if s.AdminToken == "" && len(s.ApproverTokens) == 0 {
 		return
 	}
 	files, _ := fs.Sub(inboxFiles, "inbox")

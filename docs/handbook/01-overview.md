@@ -138,5 +138,6 @@ docs/                   handbook (this), DESIGN.md, DEMO.md, ADRs, load-test res
 | 13 | SafeActionBench | The incident benchmark as an open, agent-agnostic benchmark (MCP harness, three levels of harm, reference guard, reproducible leaderboard); an independent guard alone took a small model from 33.9% to 0% harmful; 290 tests |
 | 14 | Governance and compliance | A self-verifying evidence export (offline, `--previous` for archives), policy versions in every request, signed checkpoints, per-replica self-verification and promtool-tested drift alerts, the EU AI Act / NIST AI RMF mapping, a one-click Codespaces demo; 306 tests |
 | 15 | Try it, ship it | `docker compose up` runs the guard with a live support-desk agent; a built-in approvals inbox; Prometheus with the chart's alerts and a Grafana dashboard (also in the chart); release packages for PyPI, npm and Artifact Hub, published once the maintainer opts in; 307 tests |
+| 16 | Two people | `approvals: N` per action (distinct, authenticated people; every approval signed and verified), approvers verified by OIDC or personal tokens, delegates forwarding the person's token, notifications to Slack-style webhooks; v2.0.0-alpha.3 released; 324 tests |
 
 Full detail, including every bug found: [15 Phase history](15-phase-history.md).

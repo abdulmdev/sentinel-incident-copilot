@@ -155,7 +155,7 @@ func Continues(older, newer *Evidence) []string {
 
 // phaseAfter is the phase each event type leaves a request in.
 var phaseAfter = map[string]Phase{
-	EventRequested: PhasePending, EventBlocked: PhaseBlocked, EventApproved: PhaseApproved, EventDenied: PhaseDenied,
+	EventRequested: PhasePending, EventApprovalAdded: PhasePending, EventBlocked: PhaseBlocked, EventApproved: PhaseApproved, EventDenied: PhaseDenied,
 	EventCapabilityIssued: PhaseApproved, EventExecuted: PhaseExecuted, EventReadmitted: PhaseExecuted, EventExpired: PhaseExpired,
 }
 
@@ -169,14 +169,36 @@ func consistency(r *Request) []string {
 	if want, ok := phaseAfter[r.Audit[len(r.Audit)-1].Type]; ok && r.Phase != want {
 		out = append(out, fmt.Sprintf("says %s, but its signed events end in %s", r.Phase, want))
 	}
+	var approvers []string // people whose approval is signed, in order
 	for _, e := range r.Audit {
-		if e.Type != EventApproved && e.Type != EventDenied {
-			continue
+		switch e.Type {
+		case EventApprovalAdded:
+			i := len(approvers)
+			if i >= len(r.Approvals) || r.Approvals[i].By != e.Actor {
+				out = append(out, fmt.Sprintf("does not list %s's signed approval", e.Actor))
+			}
+			approvers = append(approvers, e.Actor)
+		case EventApproved, EventDenied:
+			decision := map[string]string{EventApproved: "approve", EventDenied: "deny"}[e.Type]
+			if r.DecidedBy != e.Actor || r.Decision != decision {
+				out = append(out, fmt.Sprintf("says %q by %s, but its signed record says %q by %s", r.Decision, r.DecidedBy, decision, e.Actor))
+			}
+			if e.Type == EventApproved && !strings.HasPrefix(e.Actor, "policy:") {
+				distinct := map[string]bool{e.Actor: true}
+				for _, a := range approvers {
+					distinct[a] = true
+				}
+				if len(distinct) < r.Needed() || len(distinct) != len(approvers)+1 {
+					out = append(out, fmt.Sprintf("needed %d different people to approve, but its signed record shows %d (%s)",
+						r.Needed(), len(distinct), strings.Join(append(approvers, e.Actor), ", ")))
+				}
+			}
 		}
-		decision := map[string]string{EventApproved: "approve", EventDenied: "deny"}[e.Type]
-		if r.DecidedBy != e.Actor || r.Decision != decision {
-			out = append(out, fmt.Sprintf("says %q by %s, but its signed record says %q by %s", r.Decision, r.DecidedBy, decision, e.Actor))
-		}
+	}
+	// Approvals written through the Kubernetes API are signed by the guard within a second; until
+	// then a Pending request may list more than its events show, never anything else.
+	if len(r.Approvals) > len(approvers) && r.Phase != PhasePending {
+		out = append(out, fmt.Sprintf("lists %d approval(s), but only %d are signed", len(r.Approvals), len(approvers)))
 	}
 	return out
 }
@@ -228,6 +250,8 @@ type OversightSummary struct {
 	Deciders map[string]int `json:"deciders"`
 	// ExpiredUndecided: requests nobody decided before they expired (oversight not exercised).
 	ExpiredUndecided int `json:"expiredUndecided"`
+	// MultiPersonApproved: requests that took more than one person's approval (policy approvals).
+	MultiPersonApproved int `json:"multiPersonApproved,omitempty"`
 	// Time from request to a human decision.
 	DecisionSecondsMedian float64 `json:"decisionSecondsMedian"`
 	DecisionSecondsMax    float64 `json:"decisionSecondsMax"`
@@ -239,12 +263,25 @@ func Summarize(reqs []*Request) OversightSummary {
 	for _, r := range reqs {
 		var requested time.Time
 		decided := false
+		partial := 0
 		for _, e := range r.Audit {
 			if s.From == "" || e.At < s.From {
 				s.From = e.At
 			}
 			if e.At > s.To {
 				s.To = e.At
+			}
+			if e.Type == EventApprovalAdded {
+				who := e.Actor
+				if partial < len(r.Approvals) && r.Approvals[partial].Via != "" {
+					who += " via " + r.Approvals[partial].Via
+				}
+				s.Deciders[who]++
+				partial++
+				continue
+			}
+			if e.Type == EventApproved && partial > 0 {
+				s.MultiPersonApproved++
 			}
 			o := EventOutcome(e)
 			if o == "" {

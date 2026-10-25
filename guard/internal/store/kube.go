@@ -41,7 +41,7 @@ const (
 // Spec holds what was asked and the human decision (written by approvers through the API server,
 // stamped by the approval webhook); status holds what the guard did. Approvers can only patch spec.
 var (
-	specFields   = []string{"key", "source", "agent", "action", "target", "change", "fingerprint", "intent", "risk", "autonomy", "createdAt", "policyVersion", "decision", "decidedBy", "decidedVia", "decisionNote", "decidedAt"}
+	specFields   = []string{"key", "source", "agent", "action", "target", "change", "fingerprint", "intent", "risk", "autonomy", "createdAt", "policyVersion", "requiredApprovals", "approvals", "decision", "decidedBy", "decidedVia", "decisionNote", "decidedAt"}
 	statusFields = []string{"phase", "reasons", "preconditions", "expiresAt", "executedAt", "exact", "execGeneration", "capabilityJti", "audit"}
 )
 

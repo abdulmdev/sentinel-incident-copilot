@@ -46,6 +46,7 @@ code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .risk { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border: 1px solid currentColor; border-radius: 4px; padding: 0 6px; }
 .risk.high { color: var(--high); } .risk.medium { color: var(--medium); } .risk.low { color: var(--low); }
 .intent { margin: 8px 0; }
+.approvals { margin: 6px 0; font-size: 14px; font-weight: 500; color: var(--warn); }
 .change { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 8px 0; padding: 10px 12px; background: var(--bg); border-radius: 6px; }
 .change dt { color: var(--muted); }
 .change dd { margin: 0; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }

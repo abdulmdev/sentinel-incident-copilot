@@ -9,7 +9,7 @@ Guard is the safety core of [Sentinel](../../README.md) (approval → single-use
 - **Tamper-evident, and provable to others.** Every request, decision and execution is a signed link in a hash chain. `kubectl sentinel audit verify` checks it yourself, and also detects deleted records. `kubectl sentinel audit export` produces one evidence file that anyone can verify offline ([governance and compliance](../compliance/README.md)).
 - **Small.** One Go binary, an 11.5 MB image (compressed). It needs no database: its state lives in the Kubernetes API, so three replicas share it.
 
-> **Status: v2.0.0-alpha.3.** The design and the safety properties are tested on a real API server in CI (31 checks, below). Treat the API and the CRD (`v1alpha1`) as subject to change.
+> **Status: v2.0.0-alpha.3.** The design and the safety properties are tested on a real API server in CI (33 checks, below). Treat the API and the CRD (`v1alpha1`) as subject to change.
 
 ## Try it in one command (Docker, no cluster)
 From a clone of the repository:
@@ -18,15 +18,17 @@ From a clone of the repository:
 docker compose up
 ```
 
-That builds and starts the guard and a support-desk agent working behind it. Open **http://localhost:8080** and sign in with the approver token `approve-me`:
+That builds and starts the guard and a support-desk agent working behind it. Open **http://localhost:8080** and sign in as Alice with her token `alice-demo` (Bob's is `bob-demo`):
 - receipts go out on policy alone, and are recorded;
 - each refund waits for you in the inbox: *Approve once* or *Deny*, with a note;
+- closing an account needs two different people: Alice approves, then Bob;
 - the agent can never delete customer data, so it hands those tickets to a person;
-- now and then it reuses a spent capability, and the guard refuses (`docker compose logs -f agent`).
+- now and then it reuses a spent capability, and the guard refuses (`docker compose logs -f agent`);
+- every request that needs someone is announced to a webhook; `docker compose logs -f notifications` shows what Slack would receive.
 
 The inbox also verifies the audit chain and downloads the evidence bundle. Add `--profile monitoring` for Prometheus, loaded with the chart's alert rules (`localhost:9090`), and the Sentinel Guard dashboard in Grafana (`localhost:3000`). More in [examples/quickstart](../../examples/quickstart/README.md).
 
-![The approvals inbox, with the demo agent's refunds waiting](../handbook/images/screens/guard-inbox.png)
+![The approvals inbox, signed in as Bob: refunds waiting, and an account closure Alice has approved that needs one more person](../handbook/images/screens/guard-inbox.png)
 
 ### Or one container, driven with curl
 The same guard runs as a single process with an HTTP API: an agent asks before acting, a human approves, and the agent gets a single-use capability that the executor redeems.
@@ -174,6 +176,33 @@ actions:
 
 Preconditions are checked by the guard against your telemetry. An agent's own evidence never lets an action run on its own; an attacker can shape what an agent reads (for example through log lines), not what Prometheus measures. Target names are validated before they are put into a query, so a name can't rewrite it. When Prometheus is unreachable, a precondition is `unknown`, which never counts as observed.
 
+## Two people, verified approvers, and notifications (Phase 16)
+**Two-person rules.** Give an action `approvals: 2` (up to 5) and it needs that many *different* people:
+
+```yaml
+actions:
+  delete:        {risk: high, approvals: 2}
+  close-account: {risk: high, approvals: 2}
+```
+
+- In Kubernetes, `kubectl sentinel approve <id>` records your approval ("approval 1 of 2 … it needs 1 more, from someone else") and the request keeps waiting. The guard's webhook writes the approval as the identity the API server authenticated; nobody can write the approvals list by hand. The second person's `approve` decides it.
+- Over HTTP and in the inbox, the same: one approval per person, the last one decides.
+- The agent, its delegate, and anyone who already approved don't count. One denial ends the request.
+- The capability lists every approver (`approvers`), the audit trail has a signed event for each, and the evidence verifier checks that an approved request shows the required number of distinct people.
+
+**Approvers as themselves, outside Kubernetes.**
+- **Personal tokens:** in single-process mode, `SENTINEL_GUARD_APPROVER_TOKENS=alice@example.com=…,bob@example.com=…` gives each person a token. Decisions are recorded as that person, and no shared admin token is generated.
+- **OIDC:** with `SENTINEL_GUARD_OIDC_ISSUER` and `SENTINEL_GUARD_OIDC_AUDIENCE` (chart: `oidc.issuer`, `oidc.audience`), the guard verifies people's own OIDC tokens (Keycloak, Okta, Entra ID, Google…):
+  - signature from the issuer's published keys; issuer, audience and expiry;
+  - the person must be listed under `approvers` (users or groups).
+- **Delegates:** a delegate (your console, a chat bot) can forward the person's token in `X-Sentinel-Person-Token`. The guard then records the person it verified, instead of taking the delegate's word.
+
+**Notifications.** Set `SENTINEL_GUARD_NOTIFY_URL` (chart: `notify.existingSecret`) to a Slack or Discord incoming webhook, or any endpoint that reads JSON:
+
+> Sentinel Guard: refund-bot asks to close-account barbara (customer: barbara, reason: customer request), high risk. Why: "ticket #1044: Barbara asked us to close their account". Approved by alice@example.com; needs 1 more, from someone else. Decide: http://localhost:8080/inbox/ (request ar-725ef9ba-1)
+
+You're told when a request needs someone, when it still needs more approvals, and when one expires with nobody deciding. `SENTINEL_GUARD_PUBLIC_URL` sets the link; without it, the notice gives the `kubectl sentinel approve` command.
+
 ## The action API (agents outside Kubernetes)
 | Method and path | Who | What |
 |---|---|---|
@@ -243,7 +272,7 @@ On a fresh kind cluster (1 node, laptop), 3 replicas, through the API server ([r
 | An agent's change that is waiting for approval | 2.4 ms | 6.0 ms |
 | An agent's change after approval (admitted once) | 24.7 ms | 40.8 ms |
 
-The end-to-end suite (`scripts/guard-e2e.sh`, run in CI) passes 31 checks against a real API server:
+The end-to-end suite (`scripts/guard-e2e.sh`, run in CI) passes 33 checks against a real API server:
 - agents wait while humans don't;
 - an approval admits exactly that change, once, including across the API server's retries;
 - a different change, a second restart, or the same change after a revert each need a new approval;
@@ -252,13 +281,14 @@ The end-to-end suite (`scripts/guard-e2e.sh`, run in CI) passes 31 checks agains
 - records can't be edited or deleted;
 - dry runs preview;
 - with the guard down only agents are stopped, and it is back within 2 s of scaling up;
-- the audit chain verifies, the evidence export verifies offline, an edited export fails, and a later export extends an archived one.
+- the audit chain verifies, the evidence export verifies offline, an edited export fails, and a later export extends an archived one;
+- an action that needs two people waits after the first approval, refuses the same person twice, and is admitted once after a second person approves.
 
 ## Limits (alpha)
 - Retention: `ActionRequest` objects are kept (they are the audit record), about 2 KB per request. Export and archive them (`kubectl sentinel audit export`); there is no compaction yet.
 - The audit chain head is a single ConfigMap: every event is serialized through it. That's fine at human-approval rates, but it's not a high-volume event log.
 - One cluster per guard. API-mode agents in single-process mode keep state in memory only.
-- The inbox is for single-process mode: one shared approver token, and a self-declared name for the audit trail. With several approvers, use Kubernetes (`kubectl sentinel approve`, identities from the API server) or a delegate that signs people in.
+- The inbox is for single-process mode. Give each person their own approver token, or verify their OIDC tokens; with the shared admin token the name is self-declared. The inbox has no OIDC sign-in of its own: people paste a token.
 - The SDKs install from the repository (`pip install "sentinel-guard @ git+…"`) or from the release assets until they are published to PyPI and npm ([publishing](publishing.md)).
 - Only the operations in the table above are guarded by default. Add more with `webhook.extraRules` (they're classified as `update` or `delete`).
 

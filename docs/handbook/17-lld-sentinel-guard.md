@@ -14,7 +14,7 @@ Sentinel Guard is Sentinel's safe-action core (approval → single-use capabilit
 | `kubectl-sentinel` | `guard/cmd/kubectl-sentinel` | The kubectl plugin: `requests`, `describe`, `approve`, `deny`, `audit verify`, `audit export`, and offline `audit verify --bundle` |
 | Core | `guard/internal/guard` | Request lifecycle (`engine.go`), policy (`policy.go`), change classification (`classify.go`), capabilities and signatures (`signer.go`), audit chain (`audit.go`), evidence bundle and oversight summary (`evidence.go`), Prometheus preconditions (`precondition.go`) |
 | Storage | `guard/internal/store` | `Memory` (one process) and `Kube` (ActionRequest objects, watch cache, compare-and-swap writes) |
-| Transport | `guard/internal/server` | HTTP handlers, both webhooks, metrics, the guardian monitor (`monitor.go`), the approvals inbox (`inbox.go` + `inbox/`, single-process mode) |
+| Transport | `guard/internal/server` | HTTP handlers, both webhooks, metrics, the guardian monitor (`monitor.go`), the approvals inbox (`inbox.go` + `inbox/`, single-process mode), people's identities (`oidc.go`) and notifications (`notify.go`) |
 | Kubernetes glue | `guard/internal/kube` | Creates its TLS certificate and signing key on first start, keeps the webhook CA bundles, publishes the JWKS, TokenReview authentication |
 | Chart | `deploy/helm/sentinel-guard` | CRD, 3 replicas + PDB, RBAC (the guard, approvers, viewers), both webhook configurations, policy ConfigMap; optional PrometheusRule (`alerts/`) and Grafana dashboard (`dashboards/`) |
 | Quickstart | `compose.yaml`, `examples/quickstart/` | The guard, a demo agent, and optionally Prometheus and Grafana, in one `docker compose up` (§12) |
@@ -152,7 +152,7 @@ All numbers from `scripts/guard-e2e.sh` with `LOAD=1` on a fresh kind cluster (1
 - **Run-to-run variation.** The Phase 10 run measured 42.9 ms on the approved path and 4.9 ms for the human baseline. The human path never calls the guard, so its rise to 8.8 ms here is the host: a laptop, with other work running during this run. The extra checkpoint signature costs about 26 µs (`BenchmarkSignHash`), which these numbers can't resolve. Read the table as "tens of milliseconds for an approved change, single digits otherwise".
 - **Safety under load:** every load round also asserts that an unapproved change is denied, that a different change doesn't ride on an approval, and that the same change after a revert needs a new approval. The chain verified after 615 events across 211 requests, **with no voids** (no lost races).
 - **Guard down:** humans' changes still go through and agents' changes are refused. After scaling back up from zero, the guard answered again within **2 s** (1 s in the Phase 10 run).
-- **The end-to-end suite:** 31 checks, all passing (chapter 14). The 6 added in Phase 14 cover policy versions, the signed head, offline verification of the export, tamper detection, every replica's self-verification, and a later export extending an archived one.
+- **The end-to-end suite:** 33 checks, all passing (chapter 14; the 2 added in Phase 16 cover two-person approval). The 6 added in Phase 14 cover policy versions, the signed head, offline verification of the export, tamper detection, every replica's self-verification, and a later export extending an archived one.
 
 ## 9. Configuration
 Environment variables and chart values: [chapter 13 §8](13-deployment-and-operations.md#8-sentinel-guard). Metrics: [chapter 12 §2](12-observability.md#2-metrics-catalog-prometheus). Endpoints and the CRD: [chapter 09 §8](09-api-and-contracts.md#8-sentinel-guard).
@@ -263,4 +263,53 @@ It keeps at most `MAX_WAITING` (3) requests open and queues the rest. That way t
 *Figure 17.8: The approvals inbox in the quickstart: three refunds waiting, recent outcomes (receipts on policy, erasures blocked, one refund approved and executed), and the chain verified*
 
 **What it costs:** 136 KB of binary (stripped, darwin/arm64 build), and no route at all in Kubernetes mode.
+
+## 13. Two people, verified approvers, notifications (Phase 16)
+
+![Two-person approval: one approval keeps the request pending, the same person can't count twice, the second person decides](images/17-guard-two-person.png)
+
+*Figure 17.9: Two-person approval: one approval keeps the request pending, the same person can't count twice, the second person decides*
+
+**Engine.** `Request.RequiredApprovals` is set at creation, for requests that wait for people, when the action's `approvals` is above 1; it goes into the digest. `Request.Approvals` holds the approvals before the last. The rules are two shared functions:
+- `Partial(r)`: an approval now would be one of several;
+- `CanApprove(r, person)`: nobody counts twice.
+
+They are used by:
+- **`Engine.Decide` (HTTP):**
+  - a partial approval is a `transition` that appends to `Approvals` and chains `approval-added`;
+  - the last one is the usual decision, then `finalize`;
+  - two people approving at once may both see "partial": the loser's `transition` finds the other approval and returns `errStale`, and `Decide` retries it as the decision, up to 3 times. Six concurrent approvers leave exactly two approvals (tested).
+- **The approval webhook (Kubernetes):**
+  - an `approve` that is partial is turned, in the same JSON patch, into an `add /spec/approvals` (the authenticated user) plus `remove /spec/decision`;
+  - users can't change `spec.approvals`, and `sameRequest` ignores it so that check is explicit.
+- **`finalize` / `Reconcile`:**
+  - `recordApprovals` chains an `approval-added` for every listed approval that has no event yet, as the guard's own write, before a decision is applied;
+  - `demote` turns a decision that arrives with too few approvals into one more approval, and drops one by a person who already approved;
+  - reconcile also picks up Pending requests whose approvals aren't all signed.
+
+**Verifier.** `consistency` walks the signed events:
+- each `approval-added` must match the next listed approval;
+- an `approved` event by a person must make the required number of distinct people, with no repeats;
+- a request that has left Pending may not list unsigned approvals.
+
+`Summarize` counts every approver under `deciders` and adds `multiPersonApproved`. `approval-added` leaves the phase Pending (`phaseAfter`) and is not an outcome, so the guardian metrics and alerts are unchanged.
+
+**People** (`server/server.go`, `server/oidc.go`). `person()` resolves a token to a person:
+- a personal approver token (`StaticTokens`);
+- or an OIDC token, if its unverified `iss` is the configured issuer. It is then verified with keys from discovery and JWKS (RSA and EC, cached, refetched at most once a minute for an unknown `kid`), and must be in the policy's `approvers`.
+
+The middleware order is admin token, person, delegate. `decide` takes the decider from the authenticated person, when there is one. A delegate's `X-Sentinel-Person-Token` is verified the same way and recorded as `decidedBy`, with the delegate as `decidedVia`. The chart renders `approvers` into both the RBAC RoleBinding and the policy, so the two lists can't drift.
+
+**Measured live** against the dev Keycloak (realm `sentinel`, client `sentinel-cli`, RS256 access tokens with audience `sentinel-api`), 2026-10-25:
+- Alice's token is verified as `alice@acme.example`, an approver;
+- her approval is one of two, and her second is refused (403);
+- Carol, not an approver, is refused (403); Bob can't decide under Alice's name (400);
+- Bob's approval decides it, and the capability names both;
+- a token with a broken signature is refused (401);
+- the chain verifies.
+
+**Notifications** (`server/notify.go`):
+- `Observe` runs in the event hook. It turns `requested` (still Pending), `approval-added` and an undecided `expired` into a `Notice`.
+- A single worker posts from a 256-slot queue, with a 5 s timeout and two retries on errors and 5xx. A full queue drops, and counts the drop.
+- In Kubernetes the hook runs on the replica that chained the event, so each notice is sent once.
 

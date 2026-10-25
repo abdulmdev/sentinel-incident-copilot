@@ -222,8 +222,11 @@ func changeText(r *guard.Request) string {
 
 // phase shows a decision that the guard has not applied yet as such.
 func phase(r *guard.Request) string {
-	if r.Phase == guard.PhasePending && r.Decision != "" {
+	switch {
+	case r.Phase == guard.PhasePending && r.Decision != "":
 		return "Pending (" + r.Decision + "d)"
+	case r.Phase == guard.PhasePending && r.Needed() > 1:
+		return fmt.Sprintf("Pending (%d/%d approvals)", len(r.Approvals), r.Needed())
 	}
 	return string(r.Phase)
 }
@@ -290,6 +293,19 @@ func (c *client) describe(ctx context.Context, id string) error {
 		}
 		fmt.Printf("Precondition %q: %s\n", ch.Name, line)
 	}
+	if r.Needed() > 1 {
+		fmt.Printf("Needs:     %d different people to approve\n", r.Needed())
+	}
+	for i, a := range r.Approvals {
+		fmt.Printf("Approval %d: %s, %s", i+1, a.By, a.At.Local().Format(time.RFC1123))
+		if a.Via != "" {
+			fmt.Printf(" (via %s)", a.Via)
+		}
+		if a.Note != "" {
+			fmt.Printf(": %q", a.Note)
+		}
+		fmt.Println()
+	}
 	if r.Decision != "" {
 		fmt.Printf("Decision:  %s by %s", r.Decision, r.DecidedBy)
 		if r.DecisionNote != "" {
@@ -307,9 +323,16 @@ func (c *client) describe(ctx context.Context, id string) error {
 func (c *client) decide(ctx context.Context, id, verb, note string) error {
 	decision := map[string]string{"approve": "approve", "deny": "deny"}[verb]
 	patch, _ := json.Marshal(map[string]any{"spec": map[string]any{"decision": decision, "decisionNote": note}})
-	_, err := c.dyn.Resource(store.ActionRequests).Namespace(c.ns).Patch(ctx, id, types.MergePatchType, patch, metav1.PatchOptions{})
+	obj, err := c.dyn.Resource(store.ActionRequests).Namespace(c.ns).Patch(ctx, id, types.MergePatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		return err
+	}
+	// A request that needs several people: the guard's webhook recorded this as one approval.
+	if r, err := store.FromObject(obj); err == nil && verb == "approve" && r.Phase == guard.PhasePending && r.Decision == "" && len(r.Approvals) > 0 {
+		last := r.Approvals[len(r.Approvals)-1]
+		fmt.Printf("Recorded %s's approval of %s: %s of %s (%s), approval %d of %d.\nIt needs %d more, from someone else.\n",
+			last.By, r.ID, r.Action, r.Target, changeText(r), len(r.Approvals), r.Needed(), r.Needed()-len(r.Approvals))
+		return nil
 	}
 	// The guard applies the decision within a couple of seconds; wait so the answer is final.
 	deadline := time.Now().Add(15 * time.Second)
@@ -320,8 +343,12 @@ func (c *client) decide(ctx context.Context, id, verb, note string) error {
 		}
 		switch r.Phase {
 		case guard.PhaseApproved:
+			by := r.DecidedBy
+			for i := len(r.Approvals) - 1; i >= 0; i-- {
+				by = r.Approvals[i].By + ", " + by
+			}
 			fmt.Printf("Approved %s: %s of %s (%s), by %s.\nValid once, until %s. The agent's next identical attempt will be admitted.\n",
-				r.ID, r.Action, r.Target, changeText(r), r.DecidedBy, r.ExpiresAt.Local().Format(time.Kitchen))
+				r.ID, r.Action, r.Target, changeText(r), by, r.ExpiresAt.Local().Format(time.Kitchen))
 			return nil
 		case guard.PhaseDenied:
 			fmt.Printf("Denied %s: %s of %s, by %s.\n", r.ID, r.Action, r.Target, r.DecidedBy)
@@ -470,6 +497,9 @@ func report(rep guard.EvidenceReport, keysFromBundle bool) error {
 			fmt.Printf("  %-14s %d\n", strings.ReplaceAll(o, "_", "-"), s.Outcomes[o])
 		}
 		fmt.Printf("  expired with nobody deciding: %d\n", s.ExpiredUndecided)
+		if s.MultiPersonApproved > 0 {
+			fmt.Printf("  approved by more than one person: %d\n", s.MultiPersonApproved)
+		}
 		if s.DecisionSecondsMax > 0 {
 			fmt.Printf("  time to a human decision: median %s, longest %s\n", seconds(s.DecisionSecondsMedian), seconds(s.DecisionSecondsMax))
 		}

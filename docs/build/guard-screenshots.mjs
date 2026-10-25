@@ -1,7 +1,8 @@
 // Captures the Sentinel Guard quickstart for the handbook (docs/handbook/images/screens/):
 // the approvals inbox and the guard's Grafana dashboard.
 // Prerequisite, from the repository root: docker compose --profile monitoring up -d --build --wait
-// (let the demo agent run a minute or two, so there is something to show).
+// (let the demo agent run a minute or two, so there is something to show; approve an account
+// closure as Alice first, so Bob's view shows a two-person request half approved).
 // Usage: node guard-screenshots.mjs
 import puppeteer from "puppeteer-core";
 import { mkdir } from "node:fs/promises";
@@ -15,7 +16,7 @@ await mkdir(out, { recursive: true });
 
 const GUARD = process.env.GUARD_URL ?? "http://localhost:8080";
 const GRAFANA = process.env.GRAFANA_URL ?? "http://localhost:3000";
-const TOKEN = process.env.APPROVER_TOKEN ?? "approve-me";
+const TOKEN = process.env.APPROVER_TOKEN ?? "bob-demo";
 
 const browser = await puppeteer.launch({ executablePath: chromePath(), headless: true, args: ["--no-sandbox"] });
 const page = await browser.newPage();
@@ -32,7 +33,6 @@ try {
   await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
   await page.goto(`${GUARD}/`, { waitUntil: "networkidle0" });
   await page.type("#token", TOKEN);
-  await page.type("#name", "alice@example.com");
   await page.click("#sign-in-form button[type=submit]");
   await page.waitForSelector("#pending .request");
   await page.click("#verify");

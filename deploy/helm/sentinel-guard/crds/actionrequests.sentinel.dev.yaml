@@ -67,6 +67,18 @@ spec:
                 decidedBy: {type: string, description: "Stamped by the guard's webhook from the authenticated identity."}
                 decidedVia: {type: string, description: "The delegate that authenticated decidedBy (for example Sentinel's gateway), if any."}
                 decidedAt: {type: string}
+                requiredApprovals: {type: integer, minimum: 0, maximum: 5, description: "How many different people must approve (policy approvals)."}
+                approvals:
+                  type: array
+                  description: "Approvals before the last, for requests that need more than one person. Added by the guard's webhook from the authenticated identity."
+                  items:
+                    type: object
+                    required: [by, at]
+                    properties:
+                      by: {type: string}
+                      via: {type: string}
+                      at: {type: string}
+                      note: {type: string}
             status:
               type: object
               properties:

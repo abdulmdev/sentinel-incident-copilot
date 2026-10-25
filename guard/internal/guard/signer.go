@@ -110,14 +110,22 @@ type CapabilityClaims struct {
 	Change      map[string]string `json:"change,omitempty"`    // the approved parameters, for the executor to check
 	Fingerprint string            `json:"fingerprint"`
 	ApprovedBy  string            `json:"approved_by"`
+	Approvers   []string          `json:"approvers,omitempty"` // every person who approved, when it took more than one
 	jwt.RegisteredClaims
 }
 
 func (s *Signer) MintCapability(r *Request, expires time.Time) (token, jti string, err error) {
 	jti = randomID("cap-")
+	var approvers []string
+	if len(r.Approvals) > 0 {
+		for _, a := range r.Approvals {
+			approvers = append(approvers, a.By)
+		}
+		approvers = append(approvers, r.DecidedBy)
+	}
 	claims := CapabilityClaims{
 		RequestID: r.ID, Action: r.Action, Target: r.Target.String(), Namespace: r.Target.Namespace, Change: r.Change,
-		Fingerprint: r.Fingerprint, ApprovedBy: r.DecidedBy,
+		Fingerprint: r.Fingerprint, ApprovedBy: r.DecidedBy, Approvers: approvers,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer: s.issuer, Subject: r.Agent, Audience: jwt.ClaimStrings{CapabilityAudience}, ID: jti,
 			IssuedAt: jwt.NewNumericDate(time.Now()), ExpiresAt: jwt.NewNumericDate(expires),

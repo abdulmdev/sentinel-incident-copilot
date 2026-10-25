@@ -40,7 +40,8 @@ $ kubectl sentinel approve ar-c8f4166c-1                       # on-call enginee
 Approved ar-c8f4166c-1: scale of shop/deployment/checkout (replicas: 2 → 3), by alice.
 ```
 
-- **Bound to the exact change.** Approving "scale to 3" doesn't admit "scale to 0", a second restart, or the same change after someone reverted it. This is proven on a real API server in CI, including the API server's own write retries (31 end-to-end checks).
+- **Bound to the exact change.** Approving "scale to 3" doesn't admit "scale to 0", a second restart, or the same change after someone reverted it. This is proven on a real API server in CI, including the API server's own write retries (33 end-to-end checks).
+- **Two people where it matters.** `approvals: 2` makes an action wait for two different people, each authenticated (by Kubernetes, or by OIDC at the guard), each approval signed. Approvers are notified when a request needs them.
 - **Tamper-evident, and provable to others.** Every request, decision and execution is a signed link in a hash chain; `kubectl sentinel audit verify` checks it yourself and also detects deleted records. `kubectl sentinel audit export` gives an auditor one file to verify offline ([below](#-governance-and-compliance)).
 - **Small.** One Go binary, an 11.5 MB image, no database. Its state lives in the Kubernetes API, and 3 replicas share it.
 - **Measured** (p99 through the API server, 3 replicas, a laptop): a human's change 8.8 ms, an agent's pending change 6.0 ms, an approved change admitted once 40.8 ms.
@@ -60,7 +61,7 @@ Also `kubectl apply -f install.yaml`, `docker run ghcr.io/abdulmdev/sentinel-gua
 docker compose up
 ```
 
-Then open http://localhost:8080 (token `approve-me`). A support-desk agent works through tickets behind the guard: receipts go out on policy, every refund waits for you in the inbox (*Approve once* or *Deny*), and erasure requests are never allowed. Add `--profile monitoring` for Prometheus with the guard's drift alerts, and a Grafana dashboard. [Quickstart →](examples/quickstart/README.md)
+Then open http://localhost:8080 and sign in as Alice (token `alice-demo`; Bob's is `bob-demo`). A support-desk agent works through tickets behind the guard: receipts go out on policy, every refund waits for you in the inbox (*Approve once* or *Deny*), closing an account needs both Alice and Bob, and erasure requests are never allowed. `docker compose logs -f notifications` shows what Slack would receive. Add `--profile monitoring` for Prometheus with the guard's drift alerts, and a Grafana dashboard. [Quickstart →](examples/quickstart/README.md)
 
 Or open the repository in GitHub Codespaces (button above) and run `scripts/guard-demo.sh`, a scripted minute: a person approves, the action runs exactly once, a replay is refused, and the record is exported, verified offline and caught when edited. [What it shows →](examples/walkthrough/README.md)
 
@@ -131,7 +132,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 | **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **307** automated tests (incl. 51 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 31 Guard checks on a real API server, promtool-tested alert rules, an asserted walkthrough and a checked `docker compose` quickstart; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **324** automated tests (incl. 68 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 33 Guard checks on a real API server, promtool-tested alert rules, an asserted walkthrough and a checked `docker compose` quickstart; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 
@@ -232,7 +233,7 @@ cd guard && go test -race ./...
 LOAD=1 scripts/guard-e2e.sh
 ```
 
-CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers on real pgvector/Redis), the benchmark gate (main + held-out), docs-sync checks, Helm/kubeconform/Terraform validation, a least-privilege secrets check, and a **real kind cluster end to end** (incident → approve → `RESOLVED`, NetworkPolicy denials), and the **Sentinel Guard end to end** (31 checks, a load run, the guard taken down), and the **`docker compose` quickstart** (18 checks, with Prometheus and Grafana), then publishes multi-arch images.
+CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers on real pgvector/Redis), the benchmark gate (main + held-out), docs-sync checks, Helm/kubeconform/Terraform validation, a least-privilege secrets check, and a **real kind cluster end to end** (incident → approve → `RESOLVED`, NetworkPolicy denials), and the **Sentinel Guard end to end** (33 checks, a load run, the guard taken down), and the **`docker compose` quickstart** (28 checks, with Prometheus and Grafana), then publishes multi-arch images.
 
 ## Where to look in the code (5-minute tour)
 
@@ -271,6 +272,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 | 13 SafeActionBench | The incident benchmark as an open benchmark for any agent and any guard; an independent guard alone took a small model from 33.9% to 0% harmful |
 | 14 Governance and compliance | A signed evidence export anyone can verify offline, policy versions, signed checkpoints, guardian alerts on agent drift (tested with promtool), the EU AI Act / NIST AI RMF mapping, and a one-click Codespaces demo |
 | 15 Try it, ship it | `docker compose up` with a live agent, an approvals inbox in the guard, the guard's Grafana dashboard, signed charts and SDK packages on every release, with PyPI/npm/Artifact Hub publishing ready to switch on |
+| 16 Two people | `approvals: N` for the riskiest actions (distinct, authenticated people, every approval signed and verified), approvers verified by OIDC at the guard, notifications to Slack-style webhooks; v2.0.0-alpha.3 released |
 
 <details>
 <summary><b>All design decisions and their reasons</b></summary>
@@ -302,7 +304,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 </details>
 
 ## Roadmap
-Claude benchmark column (needs an API key) · compaction after archived evidence export · *N*-of-*M* approvals · KMS-backed signing and mTLS · async approval with streamed progress · dependency-aware alert correlation · incidents recorded from real postmortems. Details: [limitations and roadmap](docs/handbook/16-limitations-and-roadmap.md).
+Claude benchmark column (needs an API key) · compaction after archived evidence export · approvers from different teams · Slack approvals · KMS-backed signing and mTLS · async approval with streamed progress · dependency-aware alert correlation · incidents recorded from real postmortems. Details: [limitations and roadmap](docs/handbook/16-limitations-and-roadmap.md).
 
 ## Contributing and license
 Contributions are welcome: see [CONTRIBUTING](CONTRIBUTING.md) (how to run, verify and keep the docs in sync), the [code of conduct](CODE_OF_CONDUCT.md) and the [security policy](SECURITY.md). Licensed under the [Apache License 2.0](LICENSE).

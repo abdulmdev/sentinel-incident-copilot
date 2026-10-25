@@ -36,7 +36,8 @@ kind load docker-image --name "$CLUSTER" sentinel/guard:e2e >/dev/null
 
 echo "Installing Sentinel Guard with the Helm chart"
 helm upgrade --install sentinel-guard deploy/helm/sentinel-guard -n $NS --create-namespace \
-  --set image.repository=sentinel/guard --set image.tag=e2e --set image.pullPolicy=Never --wait --timeout 3m >/dev/null
+  --set image.repository=sentinel/guard --set image.tag=e2e --set image.pullPolicy=Never \
+  --set policy.actions.rollout.approvals=2 --wait --timeout 3m >/dev/null
 for _ in $(seq 1 60); do
   [ -n "$(kubectl get validatingwebhookconfiguration sentinel-guard -o jsonpath='{.webhooks[0].clientConfig.caBundle}')" ] && break
   sleep 1
@@ -108,6 +109,27 @@ if grep -q "replicas 0 is below the minimum 1" <<<"$out"; then ok "scale to zero
 
 out=$(agent -n shop delete pod -l app=web --wait=false 2>&1) && die "agent deleted pods without approval"
 if grep -q "needs human approval" <<<"$out"; then ok "agent pod deletion waits for approval"; else die "agent pod deletion waits for approval"; fi
+
+# Two people (policy approvals: 2 for "rollout", a pod-template change): the first approval is recorded and the request stays
+# pending; the same person can't count twice; a second person's approval admits the change once.
+out=$(agent -n shop set env deploy/load E2E_TWO_PERSON=1 2>&1) && die "a rollout was admitted without approval"
+TID=$(grep -o 'ar-[0-9a-f]\{8\}-[0-9]\{1,\}' <<<"$out" | head -1)
+out=$(kubectl sentinel approve "$TID" -m "e2e: first of two" 2>&1)
+grep -q "approval 1 of 2" <<<"$out" || die "the first approval should be one of two: $out"
+[ "$(kubectl -n $NS get actionrequest "$TID" -o jsonpath='{.status.phase}')" = Pending ] || die "one approval of two decided the request"
+out=$(agent -n shop set env deploy/load E2E_TWO_PERSON=1 2>&1) && die "admitted on one approval of two"
+out=$(kubectl sentinel approve "$TID" 2>&1) && die "the same person approved twice: $out"
+grep -q "already approved" <<<"$out" || die "the second approval by the same person should say so: $out"
+ok "an action that needs two people: the first approval is recorded, the same person can't count twice"
+kubectl -n $NS create rolebinding e2e-second-approver --clusterrole=sentinel-guard-approver --user=bob@example.com >/dev/null
+kubectl --as=bob@example.com -n $NS patch actionrequest "$TID" --type merge -p '{"spec":{"decision":"approve"}}' >/dev/null
+for _ in $(seq 1 30); do [ "$(kubectl -n $NS get actionrequest "$TID" -o jsonpath='{.status.phase}')" = Approved ] && break; sleep 0.5; done
+WHO="$(kubectl -n $NS get actionrequest "$TID" -o jsonpath='{.spec.approvals[0].by},{.spec.decidedBy}')"
+[ "$WHO" = "kubernetes-admin,bob@example.com" ] || die "two different authenticated people should have approved (got $WHO)"
+agent -n shop set env deploy/load E2E_TWO_PERSON=1 >/dev/null 2>&1 || die "the change approved by two people was not admitted"
+out=$(agent -n shop set env deploy/load E2E_TWO_PERSON=2 2>&1) && die "a different rollout rode on the two approvals"
+ok "a second person's approval admits it once: approved by kubernetes-admin, then bob@example.com"
+kubectl -n $NS delete rolebinding e2e-second-approver >/dev/null
 
 out=$(kubectl -n $NS delete actionrequest "$ID" 2>&1) && die "the audit record was deleted"
 if grep -q "cannot be deleted" <<<"$out"; then ok "even cluster-admin can't delete an ActionRequest"; else die "even cluster-admin can't delete an ActionRequest"; fi

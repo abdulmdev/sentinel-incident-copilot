@@ -3,9 +3,10 @@
 It runs in `docker compose up` (see compose.yaml at the repository root) and never stops on its own:
 - receipts go out on policy alone (autonomy: observe), and are still recorded;
 - refunds wait for a person: approve or deny them in the inbox at http://localhost:8080;
+- closing an account waits for two different people (policy approvals: 2);
 - deleting customer data is never allowed for an agent, so it hands those tickets to a person.
 
-Once a refund is approved, the agent redeems its single-use capability and issues it, exactly once.
+Once a refund or a closure is approved, the agent redeems its single-use capability and acts, exactly once.
 Every few approvals it also tries to reuse a spent capability, to show that the guard refuses.
 
     SENTINEL_GUARD_URL=http://localhost:8080 SENTINEL_GUARD_TOKEN=... python agent.py
@@ -33,7 +34,7 @@ def log(text: str) -> None:
 @dataclass
 class Ticket:
     number: int
-    kind: str          # refund | receipt | erasure
+    kind: str          # refund | receipt | erasure | closure
     customer: str
     order: str
     amount: str = ""
@@ -41,13 +42,13 @@ class Ticket:
 
 def tickets(rng: random.Random):
     n = 1040
-    # The first three show each path at once; after that, a realistic mix.
-    for kind in ["refund", "receipt", "erasure"]:
+    # The first four show each path at once; after that, a realistic mix.
+    for kind in ["refund", "receipt", "erasure", "closure"]:
         n += 1
         yield make(rng, n, kind)
     while True:
         n += 1
-        yield make(rng, n, rng.choices(["refund", "receipt", "erasure"], weights=[5, 4, 1])[0])
+        yield make(rng, n, rng.choices(["refund", "receipt", "erasure", "closure"], weights=[5, 4, 1, 1])[0])
 
 
 def make(rng: random.Random, n: int, kind: str) -> Ticket:
@@ -80,26 +81,38 @@ class Desk:
         else:
             if len(self.waiting) >= MAX_WAITING:
                 self.backlog.append(t)
-                log(f"#{t.number} refund for {t.order} queued: {len(self.waiting)} already wait for a person")
+                log(f"#{t.number} {t.kind} for {t.order} queued: {len(self.waiting)} already wait for people")
                 return
-            self.ask_refund(t)
+            self.ask(t)
 
-    def ask_refund(self, t: Ticket) -> None:
-        d = self.guard.propose("refund", t.order, {"order_id": t.order, "amount": t.amount},
-                               intent=f"ticket #{t.number}: {t.customer} was charged twice")
+    def ask(self, t: Ticket) -> None:
+        if t.kind == "closure":
+            what = f"close {t.customer}'s account"
+            d = self.guard.propose("close-account", t.customer.lower(), {"customer": t.customer.lower(), "reason": "customer request"},
+                                   intent=f"ticket #{t.number}: {t.customer} asked us to close their account")
+        else:
+            what = f"refund {t.amount} on {t.order}"
+            d = self.guard.propose("refund", t.order, {"order_id": t.order, "amount": t.amount},
+                                   intent=f"ticket #{t.number}: {t.customer} was charged twice")
         if d.verdict == "pending":
             self.waiting[d.request_id] = t
-            log(f"#{t.number} refund {t.amount} on {t.order}: waiting for a person, approve or deny at {INBOX}")
+            people = "two different people" if (d.request.get("requiredApprovals") or 1) > 1 else "a person"
+            log(f"#{t.number} {what}: waiting for {people}, approve or deny at {INBOX}")
         elif d.verdict == "allow":
-            self.issue(t, d.capability, d.request.get("decidedBy"))
+            self.issue(t, d.capability)
         else:
-            log(f"#{t.number} refund {t.amount} on {t.order}: {d.verdict}: {d.message}")
+            log(f"#{t.number} {what}: {d.verdict}: {d.message}")
 
-    def issue(self, t: Ticket, capability: str, approver: str | None) -> None:
-        claims = self.guard.spend(capability, executor="payments")
+    def issue(self, t: Ticket, capability: str) -> None:
+        executor = "accounts" if t.kind == "closure" else "payments"
+        claims = self.guard.spend(capability, executor=executor)
         self.spent.append(capability)
         self.approved += 1
-        log(f"#{t.number} refunded {claims['change']['amount']} on {claims['target']}, approved by {approver or claims.get('approved_by')}, executed once")
+        approvers = ", ".join(claims.get("approvers") or [claims.get("approved_by", "?")])
+        if t.kind == "closure":
+            log(f"#{t.number} closed {t.customer}'s account, approved by {approvers}, executed once")
+        else:
+            log(f"#{t.number} refunded {claims['change']['amount']} on {claims['target']}, approved by {approvers}, executed once")
         if self.approved % 3 == 1:   # now and then, show that a capability works only once
             try:
                 self.guard.spend(capability, executor="payments")
@@ -125,14 +138,14 @@ class Desk:
             del self.waiting[request_id]
             r = d.request
             if d.verdict == "allow" and d.capability:
-                self.issue(t, d.capability, r.get("decidedBy"))
+                self.issue(t, d.capability)
             elif r.get("phase") == "Denied":
                 note = f": {r['decisionNote']}" if r.get("decisionNote") else ""
-                log(f"#{t.number} refund on {t.order} denied by {r.get('decidedBy')}{note}. Leaving it to a person")
+                log(f"#{t.number} {t.kind} for {t.order} denied by {r.get('decidedBy')}{note}. Leaving it to a person")
             else:
-                log(f"#{t.number} refund on {t.order}: {r.get('phase', d.verdict)}. {d.message}")
+                log(f"#{t.number} {t.kind} for {t.order}: {r.get('phase', d.verdict)}. {d.message}")
         while self.backlog and len(self.waiting) < MAX_WAITING:
-            self.ask_refund(self.backlog.pop(0))
+            self.ask(self.backlog.pop(0))
 
 
 def main() -> int:
@@ -147,7 +160,7 @@ def main() -> int:
             if time.monotonic() >= next_ticket:
                 desk.handle(next(queue))
                 handled += 1
-                next_ticket = time.monotonic() + (2 if handled < 3 else EVERY)   # the first three at once
+                next_ticket = time.monotonic() + (2 if handled < 4 else EVERY)   # the first four at once
             desk.poll()
         except GuardUnavailable as e:
             log(f"the guard is unreachable, so nothing is done: {e}")

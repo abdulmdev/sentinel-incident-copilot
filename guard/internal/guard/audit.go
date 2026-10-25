@@ -13,6 +13,7 @@ const (
 	EventRequested        = "requested"
 	EventBlocked          = "blocked"
 	EventApproved         = "approved"
+	EventApprovalAdded    = "approval-added" // one person's approval of a request that needs more than one
 	EventDenied           = "denied"
 	EventCapabilityIssued = "capability-issued"
 	EventExecuted         = "executed"

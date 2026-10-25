@@ -110,6 +110,32 @@ type Request struct {
 
 	// PolicyVersion is the effective policy (PolicyRecord.Version) the request was evaluated under.
 	PolicyVersion string `json:"policyVersion,omitempty"`
+
+	// RequiredApprovals is how many distinct people must approve (policy `approvals`; 0 means one).
+	// Approvals are the ones recorded before the last: the last approval is the decision itself.
+	RequiredApprovals int        `json:"requiredApprovals,omitempty"`
+	Approvals         []Approval `json:"approvals,omitempty"`
+}
+
+// Approval is one person's approval of a request that needs more than one.
+type Approval struct {
+	By   string    `json:"by"`
+	Via  string    `json:"via,omitempty"` // the delegate that authenticated By, if any
+	At   time.Time `json:"at"`
+	Note string    `json:"note,omitempty"`
+}
+
+// Needed is how many distinct people must approve the request.
+func (r *Request) Needed() int { return max(r.RequiredApprovals, 1) }
+
+// ApprovedBy reports whether person already approved the request (an earlier approval).
+func (r *Request) ApprovedBy(person string) bool {
+	for _, a := range r.Approvals {
+		if a.By == person {
+			return true
+		}
+	}
+	return false
 }
 
 // Digest covers the request's identity fields; every audit event carries it, so editing what
@@ -128,6 +154,9 @@ func (r *Request) Digest() string {
 		r.Fingerprint, r.Intent, change.String(), r.CreatedAt.UTC().Format(time.RFC3339Nano)}
 	if r.PolicyVersion != "" { // requests from guards before 2.0.0-alpha.3 have none
 		fields = append(fields, "policy="+r.PolicyVersion)
+	}
+	if r.RequiredApprovals > 1 { // so lowering how many people had to approve breaks verification
+		fields = append(fields, fmt.Sprintf("approvals=%d", r.RequiredApprovals))
 	}
 	return sha(strings.Join(fields, "|"))
 }

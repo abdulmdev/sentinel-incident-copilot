@@ -1,0 +1,11 @@
+# The quickstart's policy: the walkthrough's, plus an action that needs two different people.
+agents:
+  users: [refund-bot]
+defaults: {risk: medium, autonomy: approve}
+pendingTTL: 1h
+approvalTTL: 10m
+actions:
+  refund:               {risk: high}
+  send-receipt:         {risk: low, autonomy: observe}
+  delete-customer-data: {risk: high, autonomy: deny}
+  close-account:        {risk: high, approvals: 2}

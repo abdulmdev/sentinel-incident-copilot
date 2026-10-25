@@ -34,7 +34,7 @@ The Act does not prescribe a log format or integrity mechanism. The guard's sign
 | **14(4)(c)** People can correctly interpret the output | Human-readable changes, risk tier, reasons, intent; the full request with `kubectl sentinel describe` |
 | **14(4)(d)** People can decide not to use the system, or disregard, override or reverse its output | Deny a request; set an action's autonomy to `deny`; any approval is for one execution only |
 | **14(4)(e)** People can intervene or interrupt the system through a "stop" button or similar procedure that halts it in a safe state | Scale the guard to zero: every agent's change is refused (fail closed), while humans, CI and controllers are unaffected. This is verified on a real API server by the e2e suite. For one action type, set its autonomy to `deny` |
-| **14(5)** Separate verification by two people (only for remote biometric identification, Annex III point 1(a)) | Not applicable to the guard's typical use. Each request takes one approver today; *N*-of-*M* approvals are on the roadmap |
+| **14(5)** Separate verification by two people (only for remote biometric identification, Annex III point 1(a)) | Not applicable to the guard's typical use, but the mechanism exists for any action. `approvals: 2` (up to 5) in the policy requires that many different, authenticated people. The agent, its delegate and repeat approvers don't count, each approval is a signed event, and the evidence verifier checks the number of distinct people |
 
 ## Article 19: automatically generated logs (providers)
 
@@ -47,7 +47,7 @@ The Act does not prescribe a log format or integrity mechanism. The guard's sign
 | Obligation (paraphrased) | Sentinel Guard |
 |---|---|
 | **26(1)** Take technical and organisational measures to use the system in line with its instructions for use | Policy as code (`policy.yaml`, or chart values) reviewed in Git. The version in force is recorded with every decision |
-| **26(2)** Assign human oversight to people with the necessary competence, training, authority and support | Who may approve is an RBAC binding (`approvers` in the chart). The guard records the authenticated identity of every decider. **Competence and training are yours** |
+| **26(2)** Assign human oversight to people with the necessary competence, training, authority and support | Who may approve is an RBAC binding (`approvers` in the chart), and outside Kubernetes the same list for OIDC identities, or personal approver tokens. The guard records the authenticated identity of every decider. Notifications tell assigned people when a request needs them. **Competence and training are yours** |
 | **26(5)** Monitor operation. If use may present a risk, inform the provider and the market surveillance authority, and suspend use. Report serious incidents | Guardian alerts for monitoring; the stop above for suspending; the evidence export as the record to share. **Informing providers and authorities, and incident reporting (Art. 73), are yours** |
 | **26(6)** Keep the logs the system generates automatically, to the extent they are under your control, for a period appropriate to the purpose, of at least six months, unless other law says otherwise. Financial institutions keep them as part of their documentation under financial-services law | As for Art. 19(1): records the guard never deletes, plus archived, verifiable exports |
 

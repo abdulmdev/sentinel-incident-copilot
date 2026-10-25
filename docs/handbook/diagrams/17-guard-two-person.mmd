@@ -1,0 +1,20 @@
+sequenceDiagram
+  autonumber
+  participant A as Agent
+  participant G as Sentinel Guard
+  participant N as Webhook (Slack)
+  participant Al as Alice
+  participant B as Bob
+  A->>G: propose close-account (policy approvals: 2)
+  G-->>A: pending (requiredApprovals 2)
+  G->>N: needs 2 different people · link to the inbox
+  Al->>G: approve (her OIDC or personal token)
+  G->>G: approval-added, signed · still Pending
+  G->>N: approved by alice, needs 1 more
+  Al->>G: approve again
+  G-->>Al: 403 already approved
+  B->>G: approve
+  G->>G: approved, signed · Approved
+  A->>G: status
+  G-->>A: capability (approvers: alice, bob)
+  A->>G: spend once, then act

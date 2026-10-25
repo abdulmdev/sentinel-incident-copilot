@@ -43,10 +43,26 @@ api:
   plainHTTP: false
   port: 8080
 
-# Who may approve or deny agent actions (RoleBinding to the approver role in this namespace).
+# Who may approve or deny agent actions: a RoleBinding to the approver role in this namespace
+# (kubectl sentinel approve), and the people who may decide over HTTP with an OIDC token (below).
 approvers:
   users: []
   groups: []
+
+# Verify people's own OIDC tokens at the guard (Phase 16): HTTP decisions by the approvers above, and
+# a delegate forwarding the person's token (X-Sentinel-Person-Token) instead of vouching for them.
+oidc:
+  issuer: ""          # e.g. https://keycloak.example.com/realms/acme
+  audience: ""        # the client ID the tokens are issued for (required with issuer)
+  usernameClaim: ""   # default email
+  groupsClaim: ""     # default groups
+
+# Tell people when a request needs them: a webhook (Slack, Discord, or anything reading JSON).
+notify:
+  url: ""             # or, better, a Secret:
+  existingSecret: ""  # name of a Secret holding the webhook URL
+  key: url            # its key
+  publicURL: ""       # a link people can open (e.g. a delegate's console); default: the kubectl command
 
 # The policy (see docs/guard/README.md). "agents" above is merged in.
 policy:

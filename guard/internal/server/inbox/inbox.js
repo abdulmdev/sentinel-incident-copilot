@@ -10,7 +10,8 @@ const store = {
   del(area, key) { try { window[area].removeItem(key); } catch { /* private mode */ } },
 };
 let token = store.get("sessionStorage", "sentinel-guard-token");
-let name = store.get("localStorage", "sentinel-guard-name");
+let name = store.get("sessionStorage", "sentinel-guard-name");
+let role = store.get("sessionStorage", "sentinel-guard-role");
 let timer = null;
 const busy = new Set(); // requests with a decision in flight
 
@@ -28,7 +29,7 @@ async function api(path, options = {}) {
     cache: "no-store",
   });
   if (res.status === 401) {
-    signOut("That token was not accepted. Use the approver (admin) token.");
+    signOut("That token was not accepted. Use your own approver token (the guard's SENTINEL_GUARD_APPROVER_TOKENS; in the docker compose quickstart, alice-demo or bob-demo).");
     throw new Error("unauthorized");
   }
   return res;
@@ -73,6 +74,19 @@ function card(r) {
   const intent = node.querySelector(".intent");
   if (r.intent) intent.textContent = `“${r.intent}”`; else intent.remove();
 
+  const needed = Math.max(r.requiredApprovals || 0, 1);
+  const approvals = r.approvals || [];
+  const mine = approvals.some((a) => a.by === name);
+  const progress = node.querySelector(".approvals");
+  if (needed > 1) {
+    progress.textContent = approvals.length
+      ? `Needs ${needed} different people · approved by ${approvals.map((a) => a.by).join(", ")} · ${needed - approvals.length} more`
+      : `Needs ${needed} different people to approve`;
+  } else {
+    progress.remove();
+  }
+  node.dataset.version = String(approvals.length);
+
   const change = node.querySelector(".change");
   const entries = Object.entries(r.change || {}).sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) change.remove();
@@ -90,6 +104,13 @@ function card(r) {
     `${r.agent} asked ${ago(r.createdAt)} · request ${r.id} · policy ${String(r.policyVersion || "").slice(0, 12) || "n/a"}`;
 
   const form = node.querySelector(".decide");
+  const approve = form.querySelector("button.primary");
+  if (mine) {
+    approve.disabled = true;
+    approve.textContent = "You approved";
+  } else if (needed > 1) {
+    approve.textContent = `Approve (${approvals.length + 1} of ${needed})`;
+  }
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const verdict = e.submitter && e.submitter.value === "deny" ? "deny" : "approve";
@@ -103,15 +124,18 @@ async function decide(r, verdict, note, form) {
   for (const b of form.querySelectorAll("button")) b.disabled = true;
   try {
     const res = await api(`/v1/actions/${encodeURIComponent(r.id)}/${verdict}`, {
-      method: "POST", body: JSON.stringify({ approver: name, note }),
+      method: "POST", body: JSON.stringify(role === "admin" ? { approver: name, note } : { note }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       setStatus(`Could not ${verdict} ${r.id}: ${body.error || res.status}`, true);
     } else {
-      setStatus(verdict === "approve"
-        ? `Approved ${r.action} on ${targetText(r.target)}: the agent may do exactly that, once.`
-        : `Denied ${r.action} on ${targetText(r.target)}.`);
+      const left = Math.max(body.requiredApprovals || 0, 1) - (body.approvals || []).length;
+      setStatus(verdict === "deny"
+        ? `Denied ${r.action} on ${targetText(r.target)}.`
+        : body.phase === "Pending"
+          ? `Your approval of ${r.action} on ${targetText(r.target)} is recorded. It needs ${left} more, from someone else.`
+          : `Approved ${r.action} on ${targetText(r.target)}: the agent may do exactly that, once.`);
     }
   } catch (err) {
     if (err.message !== "unauthorized") setStatus(`Could not reach the guard: ${err.message}`, true);
@@ -129,8 +153,10 @@ function render(requests) {
   // Keep cards that are still pending (so a half-typed note survives a refresh); add new ones.
   const list = $("pending");
   const want = new Set(pending.map((r) => r.id));
+  const versions = new Map(pending.map((r) => [r.id, String((r.approvals || []).length)]));
   for (const node of [...list.children]) {
-    if (!want.has(node.dataset.id) && !busy.has(node.dataset.id)) node.remove();
+    const gone = !want.has(node.dataset.id) || versions.get(node.dataset.id) !== node.dataset.version;
+    if (gone && !busy.has(node.dataset.id)) node.remove();
   }
   const have = new Set([...list.children].map((n) => n.dataset.id));
   for (const r of pending) {
@@ -152,11 +178,17 @@ function render(requests) {
       el("td", {}, r.action),
       el("td", {}, targetText(r.target)),
       el("td", { class: `outcome ${r.phase}` }, r.phase),
-      el("td", {}, r.decidedBy ? (r.decidedVia ? `${r.decidedBy} via ${r.decidedVia}` : r.decidedBy) : (r.phase === "Blocked" ? "policy" : "")),
+      el("td", {}, deciders(r)),
     );
     return tr;
   }));
   $("recent-empty").hidden = done.length > 0;
+}
+
+function deciders(r) {
+  if (!r.decidedBy) return r.phase === "Blocked" ? "policy" : "";
+  const last = r.decidedVia ? `${r.decidedBy} via ${r.decidedVia}` : r.decidedBy;
+  return [...(r.approvals || []).map((a) => a.by), last].join(", ");
 }
 
 async function refresh() {
@@ -221,14 +253,13 @@ function show() {
   if (signedIn) {
     refresh();
     timer = setInterval(refresh, 2000);
-  } else {
-    $("name").value = name;
   }
 }
 
 function signOut(message = "") {
   token = "";
   store.del("sessionStorage", "sentinel-guard-token");
+  store.del("sessionStorage", "sentinel-guard-role");
   $("pending").replaceChildren();
   $("sign-in-error").textContent = message;
   show();
@@ -238,17 +269,34 @@ document.addEventListener("DOMContentLoaded", () => {
   $("sign-in-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     token = $("token").value.trim();
-    name = $("name").value.trim();
     $("sign-in-error").textContent = "";
+    let me;
     try {
-      const res = await api("/v1/actions");
-      if (!res.ok) { $("sign-in-error").textContent = `The guard answered ${res.status}.`; return; }
+      const res = await api("/v1/whoami");
+      me = await res.json();
+      if (!res.ok) { $("sign-in-error").textContent = me.error || `The guard answered ${res.status}.`; return; }
     } catch (err) {
       if (err.message !== "unauthorized") $("sign-in-error").textContent = `Could not reach the guard: ${err.message}`;
       return;
     }
+    if (me.role === "approver") {
+      name = me.user;
+    } else if (me.role === "admin") {
+      name = $("name").value.trim();
+      if (!name) {
+        $("name-field").hidden = false;
+        $("sign-in-error").textContent = "This is the shared admin token: give your name for the audit trail.";
+        return;
+      }
+    } else {
+      $("sign-in-error").textContent = `This token belongs to ${me.role === "agent" ? "an agent" : `a ${me.role}`}; agents and services can't decide here.`;
+      token = "";
+      return;
+    }
+    role = me.role;
     store.set("sessionStorage", "sentinel-guard-token", token);
-    store.set("localStorage", "sentinel-guard-name", name);
+    store.set("sessionStorage", "sentinel-guard-name", name);
+    store.set("sessionStorage", "sentinel-guard-role", role);
     $("token").value = "";
     show();
   });

@@ -21,12 +21,12 @@
 <main>
   <section id="sign-in" class="card narrow" hidden>
     <h1>Sign in</h1>
-    <p class="muted">This guard runs in single-process mode. The approver token is the one in
-      <code>SENTINEL_GUARD_ADMIN_TOKEN</code> (the guard prints a generated one when it starts).
-      The token stays in this tab only.</p>
+    <p class="muted">Use your own approver token (<code>SENTINEL_GUARD_APPROVER_TOKENS</code>): the guard records
+      your decisions as you. The token stays in this tab only.</p>
     <form id="sign-in-form">
       <label>Approver token <input id="token" type="password" autocomplete="off" required></label>
-      <label>Your name, for the audit trail <input id="name" type="text" autocomplete="name" placeholder="alice@example.com" required></label>
+      <label id="name-field" hidden>Your name, for the audit trail (the shared admin token can't tell who you are)
+        <input id="name" type="text" autocomplete="name" placeholder="alice@example.com"></label>
       <button type="submit" class="primary">Open inbox</button>
       <p id="sign-in-error" class="error" role="alert"></p>
     </form>
@@ -76,6 +76,7 @@
       <span class="expires muted"></span>
     </div>
     <p class="intent"></p>
+    <p class="approvals"></p>
     <dl class="change"></dl>
     <ul class="checks"></ul>
     <p class="meta muted"></p>

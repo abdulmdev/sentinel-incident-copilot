@@ -695,6 +695,53 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 - **Release packages:** wheel 11 KB, sdist 13 KB, npm tarball 4 KB. `actionlint` reports no errors in either workflow.
 - **307 automated tests** (Go 50 → 51).
 
+**Released** as **v2.0.0-alpha.3** (2026-10-25), from `8ffd6af` after CI passed. The release workflow ran every step: the multi-arch image (signed), the chart (now signed too), the plugin for 5 platforms, the krew manifest, `install.yaml`, and the Python and npm SDK packages as release assets. PyPI and npm were skipped, as designed, until the repository opts in. The image and chart pull anonymously from GHCR; the krew index (`plugins/sentinel.yaml`) was committed from the release's manifest.
+
+---
+
+## Phase 16: Two people
+**Goal:** make human oversight hold up for the riskiest actions and outside Kubernetes: more than one person where it matters, every decision attributed to someone the guard authenticated, and people told when they're needed.
+
+**Built**
+- **`approvals: N` per action** (1 to 5):
+  - distinct people: not the agent, not its delegate, nobody twice;
+  - each approval before the last is a signed `approval-added` event, and the last is the decision;
+  - the required number is inside the digest; the capability lists every approver; the verifier checks the people;
+  - in Kubernetes, the approval webhook turns `kubectl sentinel approve` into an entry in `spec.approvals` until enough people have approved, and the plugin shows "approval 1 of 2".
+- **People decide as themselves:**
+  - personal approver tokens (single-process mode; no shared admin token then);
+  - OIDC tokens verified at the guard against the issuer's keys, for people listed under `approvers` (the chart fills it from its RBAC approvers);
+  - a delegate can forward the person's token (`X-Sentinel-Person-Token`);
+  - `GET /v1/whoami`.
+- **Notifications:** a webhook (Slack, Discord, any JSON reader) when a request needs someone, when it needs more approvals, and when it expires undecided. Sent off the request path and counted.
+- **The inbox:** signs people in by their own token (asks for a name only with the legacy admin token), shows approval progress, and disables *Approve* for someone who already approved.
+- **Chart:** `oidc.*`, `notify.*` (the URL from a Secret), and `approvers` rendered into the policy.
+- **The quickstart:** Alice and Bob each have a token; an account closure needs both; a notification sink prints what Slack would get. It runs 28 checks.
+- **The e2e:** two checks for a two-person rollout (33 in all).
+
+**Decisions** (ADR-0016):
+- **The last approval is the decision.** One-approval requests and their records are unchanged, and older bundles still verify.
+- **In Kubernetes, the webhook does the bookkeeping.** People keep using `kubectl sentinel approve`, and only the guard writes `spec.approvals`.
+- **The guard verifies people itself rather than trusting a delegate.** Delegates still work as before, and can now prove who they act for.
+- **Notifications are best effort, and never on the request path.**
+
+**Bugs found and fixed**
+
+| Found | How | Fix |
+|---|---|---|
+| The first two-person e2e check expected `kubectl set env` to be an `update`; the guard classifies it as a `rollout` (a pod-template change), so the single approval decided it | The e2e run (`Approved … rollout of shop/deployment/load`) | The check sets `approvals: 2` on `rollout` |
+| With OIDC enabled, a Kubernetes ServiceAccount token (also a JWT) sent by a delegate would first be tried as an OIDC token, looking up an unknown key | Reviewing the delegate path before writing the tests | The token's unverified `iss` is compared first; another issuer's token is never looked up |
+| The inbox labelled the final approval of a two-person request "Approve once", the same as a single approval | The screenshot from Bob's side | "Approve (2 of 2)" |
+| A test asserted that the requesting agent can't approve *after* the request was already approved, so it passed for the wrong reason (a conflict) | Reading the new tests back | The check runs while the request is pending, and asserts `ErrForbidden` |
+
+**Results** (2026-10-25):
+- **Guard e2e: 33/33** on a fresh kind cluster, including two people on a real API server: kubernetes-admin, then `bob@example.com` via impersonation, the same person refused.
+  - Latency from this run (`LOAD_N=100`, 25 approved samples): approved p99 27.6 ms, pending 3.8 ms, human 6.0 ms.
+  - The published figures (chapter 17 §8) stay those of the larger Phase 14 run; the admission hot path didn't change.
+- **Quickstart: 28/28**, including the two-person closure, a name mismatch refused, and the notifications.
+- **Live against Keycloak** (dev realm, RS256): 9/9 checks: the two-person flow with real tokens, a non-approver refused, a broken signature refused.
+- **324 automated tests** (Go 51 → 68).
+
 ---
 
 ## Template for the next entry

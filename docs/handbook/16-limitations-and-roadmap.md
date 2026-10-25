@@ -29,9 +29,9 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 | Product | Alertmanager only (no PagerDuty/Opsgenie) | Teams on other tools open incidents by hand | Further receivers on the same `AlertService` |
 | Guard | `ActionRequest` objects are never deleted (they are the audit record), about 2 KB each; the evidence export exists (Phase 14) but nothing compacts | Unbounded growth of objects in `sentinel-system` and etcd; the watch cache holds them all | Compaction after a verified, archived export: keep the signed head of the archived segment as the new chain's anchor |
 | Guard | A restored older signed head, with the newest events deleted, verifies on its own (Phase 14) | Someone with write access to the guard's objects and a saved older head could hide recent actions until compared with an archive | Already caught by `--previous` against an archived bundle and by `SentinelGuardAuditHeadWentBack`; stronger: an external timestamping or transparency log for each head |
-| Guard | One approver per request; no *N*-of-*M* | High-risk actions can't require two people | Per-action `approvals: N` in the policy, distinct deciders enforced by the webhook |
 | Guard | Guardian alert thresholds are starting points, unit-tested on synthetic series, not tuned on real traffic | Noisy or late alerts on real agents | Tune on real traffic |
-| Guard | The approvals inbox (single-process mode) has one shared approver token and a self-declared name; no notifications, so someone has to look | No separation of duties outside Kubernetes; requests wait unseen until they expire | Kubernetes approvals, or a delegate that signs people in; Slack approvals and per-person tokens on the roadmap |
+| Guard | The inbox has no OIDC sign-in of its own (people paste a token); notifications are best effort (an in-memory queue, two retries) and one-way (no approving from Slack yet) | A guard restart can lose queued notices; approvers switch to the inbox or kubectl to decide | An OIDC code flow in the inbox; interactive Slack approvals through a delegate that forwards the person's token |
+| Guard | Two-person rules count distinct people but not distinct teams (no "one from SRE, one from finance") | Two people from the same team can satisfy a rule meant to span teams | Per-action approver groups |
 | Compliance | `docs/compliance` maps features to the EU AI Act and NIST AI RMF; it is not legal advice or a conformity assessment | Readers may over-read a mapping as compliance | Review by counsel; follow the revised AI RMF and Commission guidance as they appear |
 | Guard | The chain head is one ConfigMap: every event is serialized through it, and `voids` grows with lost races | Throughput suits human approvals, not a high-volume event log; voids accumulate slowly | Segment the chain per period with signed checkpoints; compact voids into the export |
 | Guard | Signing key and TLS cert in Kubernetes Secrets; rotating the key drops the old public key | Events signed with an old key can't be verified after rotation | Keep a key history in the JWKS ConfigMap; optional KMS signing |
@@ -52,7 +52,7 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 
 *Figure 16.1: Roadmap items by impact and effort*
 
-0. **Sentinel Guard, next** (v2): frontier-model entries on SafeActionBench; verify the reviewer's OIDC token at the guard; turn on PyPI, npm and Artifact Hub publishing (one-time registry setup); native Claude Agent SDK and OpenAI Agents SDK adapters; a Java SDK; compaction after archived export; *N*-of-*M* approvals; external anchoring of chain heads; Slack approvals and notifications from the inbox; Kyverno/Gatekeeper packs.
+0. **Sentinel Guard, next** (v2): frontier-model entries on SafeActionBench; turn on PyPI, npm and Artifact Hub publishing (one-time registry setup); approvers from different groups; Slack approvals that forward the person's token; the copilot's gateway forwarding reviewers' tokens; native Claude Agent SDK and OpenAI Agents SDK adapters; a Java SDK; compaction after archived export; external anchoring of chain heads; Kyverno/Gatekeeper packs.
 1. **Claude column** (needs an API key); improve the local model's accuracy on red-herring and injection tiers (currently 33–38%: safe, but escalated).
 2. **Real-world benchmark data:** record chaos-lab incidents; import anonymized postmortems.
 3. **Identity, next:** KMS-backed signing; mTLS/SPIFFE between pods; egress NetworkPolicies.
@@ -68,3 +68,5 @@ Honest list of what's missing or weak, with the risk and the intended fix. Remov
 *Done in Phase 14:* the signed evidence export with offline verification, policy versions, signed checkpoints, guardian monitoring and alerts, the EU AI Act / NIST AI RMF mapping, and a one-click Codespaces demo.
 
 *Done in Phase 15:* `docker compose up` with a live agent, the approvals inbox, the guard's Grafana dashboard (in the chart too), signed charts and SDK packages on every release, with publishing ready to switch on.
+
+*Done in Phase 16:* *N*-of-*M* approvals (distinct, authenticated people; signed and verified), approvers verified by OIDC or personal tokens, delegates forwarding the person's token, notifications.

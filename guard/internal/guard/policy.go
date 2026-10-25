@@ -25,6 +25,7 @@ type Policy struct {
 	Agents              Agents                  `json:"agents"`
 	Delegates           Agents                  `json:"delegates"`
 	Auditors            Agents                  `json:"auditors"`
+	Approvers           Agents                  `json:"approvers"`
 	Defaults            ActionPolicy            `json:"defaults"`
 	Actions             map[string]ActionPolicy `json:"actions"`
 	ProtectedNamespaces []string                `json:"protectedNamespaces"`
@@ -38,7 +39,8 @@ type Policy struct {
 // Agents identifies which callers are AI agents. Everyone else (humans, CI, controllers) is
 // never stopped by the guard. The same shape lists Delegates: services trusted to record a
 // decision on behalf of a person they authenticated (Sentinel's gateway, for its console users),
-// and Auditors: identities that may read the audit trail and export evidence.
+// Auditors: identities that may read the audit trail and export evidence, and Approvers: people
+// who may decide over HTTP with their own OIDC identity, verified by the guard.
 type Agents struct {
 	Users  []string `json:"users"`
 	Groups []string `json:"groups"`
@@ -51,6 +53,9 @@ type ActionPolicy struct {
 	MinReplicas   *int               `json:"minReplicas,omitempty"`
 	MaxReplicas   *int               `json:"maxReplicas,omitempty"`
 	Namespaces    []string           `json:"namespaces,omitempty"` // if set, only these namespaces
+	// Approvals is how many distinct people must approve (default 1): two-person rules for the
+	// riskiest actions. Neither the agent nor its delegate counts, and nobody counts twice.
+	Approvals int `json:"approvals,omitempty"`
 }
 
 // PreconditionSpec is a condition the guard checks itself before an action may run on its own:
@@ -107,6 +112,9 @@ func ParsePolicy(b []byte) (*Policy, error) {
 		if a.Risk != "" && !slices.Contains([]string{"low", "medium", "high"}, a.Risk) {
 			return fmt.Errorf("policy: %s: unknown risk %q (low | medium | high)", name, a.Risk)
 		}
+		if a.Approvals < 0 || a.Approvals > 5 {
+			return fmt.Errorf("policy: %s: approvals must be between 1 and 5", name)
+		}
 		if a.Autonomy == AutonomyAuto && len(a.Preconditions) == 0 {
 			return fmt.Errorf("policy: %s: autonomy auto needs at least one precondition", name)
 		}
@@ -143,6 +151,9 @@ func (p *Policy) For(action string) ActionPolicy {
 	if a.Preconditions == nil {
 		a.Preconditions = p.Defaults.Preconditions
 	}
+	if a.Approvals == 0 {
+		a.Approvals = p.Defaults.Approvals
+	}
 	return a
 }
 
@@ -150,6 +161,11 @@ func (p *Policy) IsAgent(user string, groups []string) bool { return p.Agents.ma
 
 func (p *Policy) IsDelegate(user string, groups []string) bool {
 	return p.Delegates.matches(user, groups)
+}
+
+// IsApprover reports whether a person authenticated by OIDC may decide over HTTP.
+func (p *Policy) IsApprover(user string, groups []string) bool {
+	return p.Approvers.matches(user, groups)
 }
 
 // IsAuditor reports whether a caller may read the audit trail and export evidence over HTTP.

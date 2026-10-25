@@ -47,6 +47,14 @@ type Server struct {
 	// AdminToken enables HTTP approvals (single-process mode). In Kubernetes, humans approve
 	// through the API server instead (kubectl sentinel approve), so this stays empty.
 	AdminToken string
+	// ApproverTokens are personal tokens for the people who decide over HTTP (single-process
+	// mode): each decision is recorded as the token's person, never as a name typed in.
+	ApproverTokens StaticTokens
+	// OIDC verifies people's own OIDC tokens; they must be listed under the policy's approvers.
+	// A delegate may also forward the person's token (X-Sentinel-Person-Token) for the guard to verify.
+	OIDC *OIDC
+	// Notify tells people when a request needs them (nil: off).
+	Notify *Notifier
 	// GuardUser is the guard's own Kubernetes identity: the only one allowed to manage ActionRequests.
 	GuardUser string
 	// Generation reads a workload's metadata.generation (for Scale requests, which lack one).
@@ -79,7 +87,8 @@ func (s *Server) handler(admission bool) http.Handler {
 	})
 	mux.HandleFunc("POST /v1/actions", s.agentOnly(s.propose))
 	mux.HandleFunc("GET /v1/actions/{id}", s.agentOnly(s.status))
-	mux.HandleFunc("GET /v1/actions", s.adminOnly(s.list))
+	mux.HandleFunc("GET /v1/actions", s.approversOnly(s.list))
+	mux.HandleFunc("GET /v1/whoami", s.whoami)
 	mux.HandleFunc("POST /v1/actions/{id}/approve", s.deciders(s.decide(true)))
 	mux.HandleFunc("POST /v1/actions/{id}/deny", s.deciders(s.decide(false)))
 	mux.HandleFunc("POST /v1/capabilities/spend", s.spend)
@@ -96,6 +105,37 @@ func (s *Server) handler(admission bool) http.Handler {
 type identity struct {
 	user   string
 	groups []string
+	person bool   // a person deciding with their own identity (approver token or OIDC)
+	vouch  string // a delegate's call carrying the person's OIDC token: the verified person
+}
+
+// PersonTokenHeader carries a person's OIDC token on a delegate's call, so the guard verifies who
+// decided instead of trusting the delegate's word for it.
+const PersonTokenHeader = "X-Sentinel-Person-Token"
+
+func (s *Server) peopleEnabled() bool { return len(s.ApproverTokens) > 0 || s.OIDC != nil }
+
+// person authenticates a person deciding with their own identity. ok is false when the token is
+// not a person's; err (with an HTTP status) when it is an OIDC token that fails verification or
+// names someone who isn't an approver.
+func (s *Server) person(ctx context.Context, token string) (id identity, ok bool, code int, err error) {
+	if token == "" {
+		return identity{}, false, 0, nil
+	}
+	if user, _, e := s.ApproverTokens.Authenticate(ctx, token); e == nil {
+		return identity{user: user, person: true}, true, 0, nil
+	}
+	if s.OIDC == nil || strings.Count(token, ".") != 2 {
+		return identity{}, false, 0, nil
+	}
+	user, groups, e := s.OIDC.Authenticate(ctx, token)
+	if e != nil {
+		return identity{}, false, 0, nil // perhaps an agent's (Kubernetes) token: let the next check decide
+	}
+	if !s.Engine.Policy().IsApprover(user, groups) {
+		return identity{}, true, 403, fmt.Errorf("%s is not among the policy's approvers", user)
+	}
+	return identity{user: user, groups: groups, person: true}, true, 0, nil
 }
 
 type ctxKey struct{}
@@ -120,7 +160,7 @@ func (s *Server) agentOnly(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, 401, "invalid agent token")
 			return
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, identity{user, groups})))
+		next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, identity{user: user, groups: groups})))
 	}
 }
 
@@ -135,17 +175,38 @@ func (s *Server) deciders(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, identity{})))
 			return
 		}
+		if id, ok, code, err := s.person(r.Context(), token); ok {
+			if err != nil {
+				writeError(w, code, err.Error())
+				return
+			}
+			next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, id)))
+			return
+		}
 		if token != "" && s.Agents != nil {
 			if user, groups, err := s.Agents.Authenticate(r.Context(), token); err == nil && s.Engine.Policy().IsDelegate(user, groups) {
-				next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, identity{user, groups})))
+				id := identity{user: user, groups: groups}
+				if pt := r.Header.Get(PersonTokenHeader); pt != "" {
+					if s.OIDC == nil {
+						writeError(w, 400, PersonTokenHeader+" needs the guard's OIDC settings (SENTINEL_GUARD_OIDC_ISSUER)")
+						return
+					}
+					person, _, err := s.OIDC.Authenticate(r.Context(), pt)
+					if err != nil {
+						writeError(w, 401, "the person's token: "+err.Error())
+						return
+					}
+					id.vouch = person
+				}
+				next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, id)))
 				return
 			}
 		}
-		if s.AdminToken == "" {
+		if s.AdminToken == "" && !s.peopleEnabled() {
 			writeError(w, 403, "only a configured delegate may decide over HTTP here: people approve with `kubectl sentinel approve <id>`")
 			return
 		}
-		writeError(w, 401, "the admin token or a delegate's token is required")
+		writeError(w, 401, "an approver's token, the admin token or a delegate's token is required")
 	}
 }
 
@@ -155,6 +216,10 @@ func (s *Server) auditors(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := bearer(r)
 		if s.AdminToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.AdminToken)) == 1 {
+			next(w, r)
+			return
+		}
+		if _, ok, _, err := s.person(r.Context(), token); ok && err == nil { // approvers see what they approve
 			next(w, r)
 			return
 		}
@@ -169,18 +234,61 @@ func (s *Server) auditors(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (s *Server) adminOnly(next http.HandlerFunc) http.HandlerFunc {
+// approversOnly admits the people who decide over HTTP: the admin token, or a person's own token.
+func (s *Server) approversOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.AdminToken == "" {
+		if s.AdminToken == "" && !s.peopleEnabled() {
 			writeError(w, 404, "HTTP approvals are disabled here: approve with `kubectl sentinel approve <id>`")
 			return
 		}
-		if subtle.ConstantTimeCompare([]byte(bearer(r)), []byte(s.AdminToken)) != 1 {
-			writeError(w, 401, "the admin token is required")
+		token := bearer(r)
+		if s.AdminToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.AdminToken)) == 1 {
+			next(w, r)
 			return
 		}
-		next(w, r)
+		if _, ok, code, err := s.person(r.Context(), token); ok {
+			if err != nil {
+				writeError(w, code, err.Error())
+				return
+			}
+			next(w, r)
+			return
+		}
+		writeError(w, 401, "an approver's token (or the admin token) is required")
 	}
+}
+
+// whoami tells a caller who the guard takes them for, and what they may do: the inbox shows it.
+func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
+	token := bearer(r)
+	if s.AdminToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.AdminToken)) == 1 {
+		writeJSON(w, 200, map[string]any{"role": "admin", "note": "a shared token: decisions record the name you give"})
+		return
+	}
+	if id, ok, code, err := s.person(r.Context(), token); ok {
+		if err != nil {
+			writeError(w, code, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"user": id.user, "role": "approver"})
+		return
+	}
+	if token != "" && s.Agents != nil {
+		if user, groups, err := s.Agents.Authenticate(r.Context(), token); err == nil {
+			p, role := s.Engine.Policy(), "caller"
+			switch {
+			case p.IsAgent(user, groups):
+				role = "agent"
+			case p.IsDelegate(user, groups):
+				role = "delegate"
+			case p.IsAuditor(user, groups):
+				role = "auditor"
+			}
+			writeJSON(w, 200, map[string]any{"user": user, "role": role})
+			return
+		}
+	}
+	writeError(w, 401, "unknown token")
 }
 
 // ProposeRequest is what an agent sends before acting.
@@ -254,12 +362,32 @@ func (s *Server) decide(approve bool) http.HandlerFunc {
 			Approver string `json:"approver"`
 			Note     string `json:"note"`
 		}
-		if err := decodeBody(r, &body); err != nil || body.Approver == "" {
+		if err := decodeBody(r, &body); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		id := r.Context().Value(ctxKey{}).(identity)
+		decider, via := body.Approver, id.user // via is empty for the admin token
+		if verified := map[bool]string{true: id.user, false: id.vouch}[id.person]; verified != "" {
+			// The guard authenticated the person: that is who decides, whatever the body says.
+			if body.Approver != "" && body.Approver != verified {
+				writeError(w, 400, fmt.Sprintf("you are deciding as %s (from your token), not %s", verified, body.Approver))
+				return
+			}
+			decider = verified
+			if id.person {
+				via = ""
+			}
+		}
+		if decider == "" {
 			writeError(w, 400, "approver (who is deciding, for the audit trail) is required")
 			return
 		}
-		via := r.Context().Value(ctxKey{}).(identity).user // empty for the admin token
-		req, err := s.Engine.Decide(r.Context(), r.PathValue("id"), body.Approver, nil, via, approve, body.Note)
+		var groups []string // the decider's groups: known only for a person the guard authenticated
+		if id.person {
+			groups = id.groups
+		}
+		req, err := s.Engine.Decide(r.Context(), r.PathValue("id"), decider, groups, via, approve, body.Note)
 		if err != nil {
 			s.writeErr(w, err)
 			return
@@ -406,6 +534,9 @@ func (s *Server) Hook() {
 			if o := guard.EventOutcome(e); o != "" {
 				s.Metrics.Outcomes.WithLabelValues(r.Agent, r.Action, o).Inc()
 			}
+		}
+		if s.Notify != nil {
+			s.Notify.Observe(e, r)
 		}
 		s.Log.Info("audit", "seq", e.Seq, "type", e.Type, "request", r.ID, "agent", r.Agent, "action", r.Action,
 			"target", r.Target.String(), "actor", e.Actor, "detail", e.Detail, "hash", e.Hash)

@@ -120,6 +120,9 @@ func (s *Server) admitApproval(w http.ResponseWriter, r *http.Request) bool {
 	if err1 != nil || err2 != nil {
 		return respond(w, review, deny("unreadable ActionRequest"))
 	}
+	if !reflect.DeepEqual(before.Approvals, after.Approvals) {
+		return respond(w, review, deny("spec.approvals is written by Sentinel Guard: approve with spec.decision (kubectl sentinel approve)"))
+	}
 	if !sameRequest(before, after) {
 		return respond(w, review, deny("what was requested cannot be edited; only spec.decision (approve or deny) and spec.decisionNote"))
 	}
@@ -134,10 +137,37 @@ func (s *Server) admitApproval(w http.ResponseWriter, r *http.Request) bool {
 	if err := guard.CanDecide(before, user, isAgent, s.Engine.Now()); err != nil {
 		return respond(w, review, deny("Sentinel Guard: "+err.Error()))
 	}
+	now := s.Engine.Now().UTC()
+	if after.Decision == "approve" {
+		if err := guard.CanApprove(before, user); err != nil {
+			return respond(w, review, deny("Sentinel Guard: "+err.Error()))
+		}
+		if guard.Partial(before) {
+			// One of several approvals: record it (as the authenticated user) and keep the request
+			// pending. The guard signs it as an approval-added event.
+			approvals := append(append([]guard.Approval(nil), before.Approvals...),
+				guard.Approval{By: user, At: now, Note: after.DecisionNote})
+			ops := []map[string]any{
+				{"op": "add", "path": "/spec/approvals", "value": approvals},
+				{"op": "remove", "path": "/spec/decision"},
+			}
+			if spec, _ := newObj.Object["spec"].(map[string]any); spec != nil {
+				if _, ok := spec["decisionNote"]; ok {
+					ops = append(ops, map[string]any{"op": "remove", "path": "/spec/decisionNote"})
+				}
+			}
+			patch, _ := json.Marshal(ops)
+			pt := admissionv1.PatchTypeJSONPatch
+			return respond(w, review, &admissionv1.AdmissionResponse{Allowed: true, Patch: patch, PatchType: &pt,
+				Warnings: []string{fmt.Sprintf("Sentinel Guard: approval %d of %d recorded for %s; it needs %d more, from other people",
+					len(approvals), before.Needed(), before.ID, before.Needed()-len(approvals))},
+				AuditAnnotations: map[string]string{"decision": "approval", "request": before.ID}})
+		}
+	}
 	patch, _ := json.Marshal([]map[string]any{
 		{"op": "add", "path": "/spec/decidedBy", "value": user},
 		{"op": "add", "path": "/spec/decidedVia", "value": ""}, // a person deciding through the API server attests nothing for others
-		{"op": "add", "path": "/spec/decidedAt", "value": s.Engine.Now().UTC().Format(time.RFC3339Nano)},
+		{"op": "add", "path": "/spec/decidedAt", "value": now.Format(time.RFC3339Nano)},
 	})
 	pt := admissionv1.PatchTypeJSONPatch
 	return respond(w, review, &admissionv1.AdmissionResponse{Allowed: true, Patch: patch, PatchType: &pt,
@@ -148,7 +178,7 @@ func (s *Server) admitApproval(w http.ResponseWriter, r *http.Request) bool {
 func sameRequest(a, b *guard.Request) bool {
 	strip := func(r *guard.Request) string {
 		c := *r
-		c.Decision, c.DecidedBy, c.DecidedVia, c.DecisionNote, c.DecidedAt = "", "", "", "", nil
+		c.Decision, c.DecidedBy, c.DecidedVia, c.DecisionNote, c.DecidedAt, c.Approvals = "", "", "", "", nil, nil
 		// status is written by the guard through the status subresource, never through this path
 		c.Phase, c.Reasons, c.Preconditions, c.ExecutedAt, c.CapabilityJTI, c.Audit, c.Exact, c.ExecGeneration = "", nil, nil, nil, "", nil, "", 0
 		c.ExpiresAt = time.Time{}

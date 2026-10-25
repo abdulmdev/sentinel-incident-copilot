@@ -1,8 +1,9 @@
 # Sentinel Guard in one command: the guard, and a support-desk agent working behind it.
 #
-#   docker compose up                       # then open http://localhost:8080 (token: approve-me)
+#   docker compose up                       # then open http://localhost:8080 (token: alice-demo)
 #   docker compose --profile monitoring up  # also Prometheus (alerts) and Grafana on :3000
 #
+# Two approvers, each with their own token (alice-demo, bob-demo): closing an account needs both.
 # The tokens below are for trying it on your machine. Ports are bound to localhost only.
 # The incident-response copilot's full stack is a different compose file: deploy/docker-compose.yml.
 name: sentinel-guard-quickstart
@@ -15,17 +16,28 @@ services:
       SENTINEL_GUARD_MODE: memory
       SENTINEL_GUARD_POLICY: /etc/sentinel-guard/policy.yaml
       SENTINEL_GUARD_AGENT_TOKENS: refund-bot=${AGENT_TOKEN:-agent-demo-token}
-      SENTINEL_GUARD_ADMIN_TOKEN: ${APPROVER_TOKEN:-approve-me}
+      SENTINEL_GUARD_APPROVER_TOKENS: alice@example.com=${ALICE_TOKEN:-alice-demo},bob@example.com=${BOB_TOKEN:-bob-demo}
       SENTINEL_GUARD_VERIFY_INTERVAL: 30s
+      SENTINEL_GUARD_NOTIFY_URL: http://notifications:8000/
+      SENTINEL_GUARD_PUBLIC_URL: http://localhost:${GUARD_PORT:-8080}
     volumes:
-      - ./examples/walkthrough/policy.yaml:/etc/sentinel-guard/policy.yaml:ro
+      - ./examples/quickstart/policy.yaml:/etc/sentinel-guard/policy.yaml:ro
     ports:
       - "127.0.0.1:${GUARD_PORT:-8080}:8080"
+    depends_on: [notifications]
     healthcheck:
       test: ["CMD", "/sentinel-guard", "-healthcheck"]
       interval: 2s
       timeout: 2s
       retries: 30
+
+  notifications:
+    # Stands in for Slack: prints what the guard would post (docker compose logs -f notifications).
+    image: python:3.13-slim
+    command: ["python", "-u", "/app/notify_sink.py"]
+    volumes:
+      - ./examples/quickstart/notify_sink.py:/app/notify_sink.py:ro
+    user: "65532:65532"
 
   agent:
     build: { context: ., dockerfile: examples/quickstart/agent.Dockerfile }

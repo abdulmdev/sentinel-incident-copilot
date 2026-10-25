@@ -49,6 +49,29 @@ spec:
             {{- if .Values.api.plainHTTP }}
             - {name: SENTINEL_GUARD_API_ADDR, value: ":{{ .Values.api.port }}"}
             {{- end }}
+            {{- with .Values.oidc }}
+            {{- if .issuer }}
+            - {name: SENTINEL_GUARD_OIDC_ISSUER, value: {{ .issuer | quote }}}
+            - {name: SENTINEL_GUARD_OIDC_AUDIENCE, value: {{ required "oidc.audience is required with oidc.issuer" .audience | quote }}}
+            {{- with .usernameClaim }}
+            - {name: SENTINEL_GUARD_OIDC_USERNAME_CLAIM, value: {{ . | quote }}}
+            {{- end }}
+            {{- with .groupsClaim }}
+            - {name: SENTINEL_GUARD_OIDC_GROUPS_CLAIM, value: {{ . | quote }}}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.notify }}
+            {{- if .existingSecret }}
+            - name: SENTINEL_GUARD_NOTIFY_URL
+              valueFrom: {secretKeyRef: {name: {{ .existingSecret | quote }}, key: {{ .key | default "url" | quote }}}}
+            {{- else if .url }}
+            - {name: SENTINEL_GUARD_NOTIFY_URL, value: {{ .url | quote }}}
+            {{- end }}
+            {{- with .publicURL }}
+            - {name: SENTINEL_GUARD_PUBLIC_URL, value: {{ . | quote }}}
+            {{- end }}
+            {{- end }}
           ports:
             - {name: https, containerPort: 8443}
             - {name: metrics, containerPort: 9090}

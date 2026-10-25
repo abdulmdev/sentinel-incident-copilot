@@ -1,6 +1,6 @@
 # 14 Testing and CI
 
-**307 automated tests** (measured 2026-10-25; 306 after Phase 14, 290 after Phase 13, 277 after Phase 12, 252 after Phase 11, 244 after Phase 10, 212 before it):
+**324 automated tests** (measured 2026-10-25; 307 after Phase 15, 306 after Phase 14, 290 after Phase 13, 277 after Phase 12, 252 after Phase 11, 244 after Phase 10, 212 before it):
 
 | Suite | Tests |
 |---|---|
@@ -8,7 +8,7 @@
 | Python SDK + MCP proxy | 19 (against the real guard binary) |
 | TypeScript SDK | 6 (against the real guard binary) |
 | gateway | 93 (67 unit/slice + 26 integration) |
-| sentinel-guard (Go) | 51 (39 test functions + 12 subtests), run with the race detector |
+| sentinel-guard (Go) | 68 (52 test functions + 16 subtests), run with the race detector |
 | agent | 72 (incl. 9 parametrized cases and 3 Postgres tests: durability + checkpoint RLS) |
 | mcp-remediation | 17 |
 | eval scorer + runner | 14 |
@@ -23,9 +23,9 @@ Plus:
 - `scripts/check_chart_secrets.py` (who may hold which secret, production and kind values);
 - k6 load thresholds;
 - a **scripted live closed-loop scenario** (section 4);
-- **Sentinel Guard end to end** on a real API server: 31 checks, a load run and the guard taken down (section 4A);
+- **Sentinel Guard end to end** on a real API server: 33 checks, a load run and the guard taken down (section 4A);
 - **the guard walkthrough** (`scripts/guard-demo.sh`, what Codespaces runs): 13 assertions across 11 steps, against a real guard (Phase 14);
-- **the docker compose quickstart** (`examples/quickstart/check.py`): 18 checks against the running stack, including the monitoring profile (Phase 15; section 4B).
+- **the docker compose quickstart** (`examples/quickstart/check.py`): 28 checks against the running stack, including two-person approvals, notifications and the monitoring profile (Phases 15 and 16; section 4B).
 
 ## 1. Strategy
 
@@ -107,7 +107,7 @@ uv run --project agent-service python evals/rca/run.py --check
 | `test_auth.py` (8) | Gateway → agent: no token → 401; a token for the tenant → accepted; **another tenant's token → 403 in path and body**; tool-token audience, forged key, expired, and HS256 shared-secret tokens → 401; health and metrics open |
 | `test_postgres_checkpointer.py` (3) | Durability across processes (the approval lives in the guard, so it survives the restart too, and the incident resolves); **checkpoint RLS**: a request bound to another tenant reads nothing and can't write (`InsufficientPrivilege`), an unbound request reads nothing; tables FORCE RLS even for their owner |
 
-### sentinel-guard (51; `cd guard && go test -race ./...`)
+### sentinel-guard (68; `cd guard && go test -race ./...`)
 - **Engine** (`internal/guard/engine_test.go`):
   - an approval admits exactly once, a retry while pending reuses the request, a replay opens a new one;
   - the approval is bound to the exact change and target;
@@ -144,6 +144,19 @@ uv run --project agent-service python evals/rca/run.py --check
   - a later bundle must extend an archived one: removed events or a head that went back are reported;
   - the head is signed; an unsigned head from an older guard only warns; a forged head signature fails;
   - a change the guard makes to the policy changes its version, and the new version is recorded before it is used.
+- **Two-person approvals** (`internal/guard/approvals_test.go`, Phase 16):
+  - one approval of two leaves the request pending, as a signed `approval-added` event, and admits nothing; the same person again, and the requesting agent, are refused; a second person, via a delegate, decides;
+  - the capability names every approver; one denial ends the request whatever came before;
+  - approvals written into `spec.approvals` (the webhook's path) are signed by reconcile, once; the same person deciding again is dropped; a decision written with too few approvals is demoted to one approval;
+  - six people approving at once: exactly two different people approve;
+  - **four tamperings caught, each with its reason:** fewer people required, an approval removed, the first approver renamed, an approval added;
+  - policy: at most 5; `defaults` apply; an unset value keeps the policy version unchanged.
+- **People, OIDC and notifications** (`internal/server/people_test.go`, Phase 16):
+  - personal approver tokens: `whoami`, listing, the inbox served without an admin token, a different name refused, the decision recorded as the token's person, an unknown token refused, verification allowed;
+  - OIDC against a test issuer (discovery + JWKS, RS256): an approver by user and by group decide as themselves; a non-approver gets 403; an unverified email, another audience, an expired token, another issuer and `alg: none` get 401;
+  - a delegate forwarding the person's token: refused without the guard's OIDC settings, refused when invalid or when the delegate's claim differs; recorded as the verified person via the delegate;
+  - the approval webhook for a two-person action: the first `approve` becomes `spec.approvals` (the authenticated user and the note, the decision removed) with a warning; the same user again and a hand-written `spec.approvals` are refused; the second person's approval is the decision;
+  - notifications: two notices (asked, then one of two approved) with the right text, structured fields and inbox link; a 503 retried; `sent` counted.
 - **Benchmarks** (not counted as tests): `BenchmarkVerifyEvidence` (1,000 requests, 3,000 events: about 0.18 s; about 2.1 KB per request) and `BenchmarkSignHash` (about 26 µs), Apple M1 Pro.
 
 ### SafeActionBench (13; `bench/`: `uv run pytest`)
@@ -211,7 +224,7 @@ Each metric's definition, including the edge cases: wrong escalation isn't harmf
 | `deploy-config` | `helm lint` (both charts); **`promtool check rules`** (lab + guard) and **`promtool test rules`** (guardian alerts), and the PrometheusRule renders (Phase 14); the guard dashboard is valid JSON, every query names a guard series, and the chart renders it (Phase 15); `helm template \| kubeconform -strict` for defaults/kind/aws; **`check_chart_secrets.py`** (`--prod`: signing keys only in the gateway, no dev secret anywhere; kind: no signing material outside the gateway/web); `terraform fmt -check`, `init -backend=false`, `validate` | Validity + least privilege |
 | `bench` | `uv run --frozen pytest` in `bench/`: the data equals its source byte for byte; scoring, the reference guard, the MCP harness (exact parity, all 112 incidents) and `serve` over stdio; **the leaderboard page equals what the stored predictions render** | Tests + reproducibility |
 | `sdks` | Builds the guard once; the Python SDK + MCP proxy (`uv run --frozen pytest`) and the TypeScript SDK (`npm ci`, build, `node --test`) against it; then **`scripts/guard-demo.sh`**, the walkthrough Codespaces runs, which fails if any step doesn't behave as described (Phase 14); then the release packages build (`uv build`, `npm pack`; Phase 15) | Tests |
-| `quickstart` | `TICKET_EVERY=3 docker compose --profile monitoring up -d --build --wait` at the repository root, then `examples/quickstart/check.py --monitoring` (18 checks, section 4B); logs on failure; always `down -v` (Phase 15) | The one-command quickstart works |
+| `quickstart` | `TICKET_EVERY=3 docker compose --profile monitoring up -d --build --wait` at the repository root, then `examples/quickstart/check.py --monitoring` (28 checks, section 4B); logs on failure; always `down -v` (Phase 15) | The one-command quickstart works |
 | `guard` | `gofmt` check, `go vet`, `go test -race ./...`, both binaries build (`deploy-config` also lints the guard chart and validates it with kubeconform; the CRD itself is validated by the real API server in `guard-e2e`) | Tests |
 | `guard-e2e` (needs guard, deploy-config) | `scripts/guard-e2e.sh` with `LOAD=1 LOAD_N=100` on a fresh kind cluster (section 4A) | End to end on a real API server |
 | `kind-e2e` (needs the above) | kind cluster; `scripts/kind-up.sh`; seed knowledge; inject a fault; open an incident → expect `AWAITING_APPROVAL`; **approve → expect `RESOLVED`** (capability → remediation adapter → verification, in-cluster); **assert the console pod can't reach the agent or the remediation adapter** | End to end + NetworkPolicy |
@@ -246,7 +259,7 @@ Both alert resolutions were later stamped on their incidents. While the gateway 
 The first run of step 7 failed, which is why it's in the suite now. See the Phase 7 bugs in [chapter 15](15-phase-history.md#phase-7-close-the-loop).
 
 ## 4A. Sentinel Guard end to end (`scripts/guard-e2e.sh`)
-It creates a kind cluster, builds the image and the plugin, installs the chart (3 replicas), creates an `agents/fixer` ServiceAccount with `edit` on namespace `shop`, and runs **31 checks**. Each one fails the run if it doesn't hold:
+It creates a kind cluster, builds the image and the plugin, installs the chart (3 replicas, `rollout` needing two approvals), creates an `agents/fixer` ServiceAccount with `edit` on namespace `shop`, and runs **33 checks**. Each one fails the run if it doesn't hold:
 
 1. **Setup:** installed, all replicas ready, and the guard set its own webhook CA bundle.
 2. **Who is stopped:**
@@ -278,32 +291,46 @@ It creates a kind cluster, builds the image and the plugin, installs the chart (
    - the audit chain is intact;
    - an export taken now extends the one archived before the load run and the outage (`--previous`).
 
-Last run: 31/31, 2026-10-24 (chapter 17 §8 has the numbers).
+**Two people** (Phase 16, `policy.actions.rollout.approvals=2`): an agent's `kubectl set env` (a rollout) waits; `kubectl sentinel approve` as kubernetes-admin records approval 1 of 2 and the request stays Pending; the same person again is refused; `--as=bob@example.com` (bound to the approver role for the check) approves it; the change is admitted once, and a different rollout is not.
+
+Last run: 33/33, 2026-10-25 (chapter 17 §8 has the latency numbers, from the 2026-10-24 run).
 
 ## 4B. The docker compose quickstart (`examples/quickstart/check.py`, Phase 15)
 Runs against `docker compose --profile monitoring up` at the repository root, with the demo agent at a ticket every 3 s. Every check waits for its condition, with a timeout.
-1. **The guard and its inbox (4):**
+1. **The guard and its inbox (5):**
    - ready;
    - `/` redirects to `/inbox/`;
    - the inbox is served with a CSP of `default-src 'none'` and `script-src 'self'`;
-   - listing requests without the token is a 401.
+   - listing requests without a token is a 401;
+   - Alice's personal token is `alice@example.com`, an approver (`/v1/whoami`).
 2. **The agent, behind the guard (3):**
    - a refund from `refund-bot` waits for a person at high risk;
    - a receipt executed on policy;
    - an erasure was blocked, with the policy's reason.
-3. **A person decides (5):**
-   - an approval through the API the inbox uses;
-   - the agent redeems the capability and the request is `Executed`, decided by the checker;
-   - a second refund is denied;
-   - the agent's log shows the execution, a reused capability refused with 409, and the denial with its note.
-4. **The record (2):** the audit chain verifies, and the evidence bundle exports (`sentinel-guard-evidence/v1`).
-5. **Monitoring (4):**
+3. **People decide, as themselves (4):**
+   - Alice approves a refund with her own token, and it's recorded as her;
+   - the agent redeems the capability and the request is `Executed`;
+   - Bob can't decide under Alice's name;
+   - Bob denies a second refund.
+4. **Two people for a closure (5):**
+   - the account closure needs two;
+   - Alice's approval leaves it pending;
+   - Alice again is refused (403);
+   - Bob's approval decides it;
+   - the agent acts once, with both approvers in its capability.
+5. **The agent's log and the notifications (4):**
+   - a reused capability refused with 409;
+   - the denial with its note;
+   - a notice for each request that needs a person, linking to the inbox;
+   - a notice when one of two has approved.
+6. **The record (2):** the audit chain verifies, and the evidence bundle exports, counting the two-person approval.
+7. **Monitoring (4):**
    - Prometheus loaded 8 alerts and 6 recording rules from the chart's file;
    - it scrapes per-agent outcomes;
    - `sentinel_guard_audit_chain_ok` is 1;
    - Grafana serves the `sentinel-guard` dashboard.
 
-Last run: 18/18, 2026-10-25, about 4 s once the stack is up.
+Last run: 28/28, 2026-10-25 (Phase 16).
 
 ## 5. Adding tests: rules
 - New DB behavior → a Testcontainers IT that connects as `sentinel_app` (not the container superuser).

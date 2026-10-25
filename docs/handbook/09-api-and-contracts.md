@@ -222,8 +222,9 @@ Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8
 | `POST /v1/actions` | agent: ServiceAccount token (TokenReview) in Kubernetes; `SENTINEL_GUARD_AGENT_TOKENS` in memory mode | `{action, target: {name, namespace?, group?, resource?}, change?: {k: v}, intent?, dryRun?}` (unknown fields → 400) → `200 {verdict: "allow", request, capability, message}` · `202 {verdict: "pending", request, reasons, message}` · `403 {verdict: "block", …}`. The fingerprint is a digest of `change` |
 | `GET /v1/actions/{id}` | the requesting agent (others get 404) | as above; once approved, the capability is returned **once** |
 | `POST /v1/capabilities/spend` | none (the capability is the credential) | `{capability, executor?}` → `200 {request, claims}` · `409` already used / no longer valid · `403` invalid (signature, `alg`, issuer, audience, expiry) |
-| `GET /v1/actions` | admin token (memory mode) | `{requests: [...]}` |
-| `POST /v1/actions/{id}/approve`, `/deny` | the admin token (memory mode), or a **delegate** (policy `delegates`; Phase 11): a service that authenticated the person itself, e.g. Sentinel's gateway. In Kubernetes there is no admin token: people approve with `kubectl sentinel`, and only delegates use HTTP (others: 403) | `{approver, note?}` → the request, with `decidedBy` = approver and `decidedVia` = the delegate (the audit event reads "… [via …]"). 403 if the approver or the delegate is the requester; 409 if decided or expired |
+| `GET /v1/actions` | the admin token, or an approver's own token (personal token or OIDC; Phase 16) | `{requests: [...]}` |
+| `GET /v1/whoami` | any token | who the guard takes the caller for: `{role: "admin"}` · `{user, role: "approver"}` · `{user, role: "agent" \| "delegate" \| "auditor" \| "caller"}`; 401 for an unknown token (Phase 16) |
+| `POST /v1/actions/{id}/approve`, `/deny` | **a person's own token** (Phase 16): a personal approver token (`SENTINEL_GUARD_APPROVER_TOKENS`) or an OIDC token of someone in the policy's `approvers`; the shared admin token (memory mode); or a **delegate** (policy `delegates`; Phase 11), optionally forwarding the person's OIDC token in `X-Sentinel-Person-Token`. In Kubernetes there is no admin token: people approve with `kubectl sentinel` | `{approver?, note?}` → the request. When the guard authenticated the person (their token, or the forwarded one), that person decides and a different `approver` is a 400; otherwise `approver` is required and recorded as given. `decidedVia` = the delegate. For an action with `approvals: N`, each approval before the last returns the request still `Pending` with `approvals[]` grown; the same person again is a 403. 403 if the decider or the delegate is the requester; 409 if decided or expired; 401 for an invalid person token |
 | `GET /v1/audit/verify` | admin token, or an **auditor** (policy `auditors`; Phase 14) | `{ok, events, requests, headSeq, voided, policies, problems[], warnings[]}` |
 | `GET /v1/audit/export` | admin token, or an auditor (Phase 14) | the evidence bundle (below), with `Content-Disposition: attachment; filename="sentinel-guard-evidence-<UTC time>.json"` |
 | `GET /.well-known/jwks.json` | none | ES256 public key (`kid` = thumbprint) |
@@ -237,7 +238,10 @@ Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8
 - `aud`: `sentinel-action`;
 - `sub`: the agent;
 - `jti`, `iat`, `exp` (= the approval's expiry);
-- `request_id`, `action`, `target`, `fingerprint`, `approved_by`.
+- `request_id`, `action`, `target`, `fingerprint`, `approved_by`;
+- `approvers`: everyone who approved, in order, when the action needed more than one person (Phase 16).
+
+**Notification** (`POST` to `SENTINEL_GUARD_NOTIFY_URL`, JSON; Phase 16): `{text, content, event: {kind, requestId, agent, action, target, change, intent, risk, approvalsNeeded, approvedBy[], expiresAt, url}}`. `text` (Slack) and `content` (Discord) carry the same sentence. `kind` is `approval_needed` (a new request, or one approval of several) or `expired_undecided`. A 2xx answer counts as delivered; errors and 5xx are retried twice.
 
 **Evidence bundle** (`format: sentinel-guard-evidence/v1`; Phase 14):
 - `generatedAt`, `generatedBy`;
@@ -245,15 +249,15 @@ Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8
 - `head`: `{seq, hash, voids[], at, kid, sig}`, the signature over `sha256("head|seq|hash|at")`;
 - `policies[]`: `{version, text, loadedAt, kid, sig}`, where `version` = SHA-256 of `text` and the signature is over `sha256("policy|version|loadedAt")`;
 - `requests[]`: as stored, each with its `audit` events, in chain order;
-- `summary`: `{requests, from, to, outcomes, byAgent, deciders, expiredUndecided, decisionSecondsMedian, decisionSecondsMax}`.
+- `summary`: `{requests, from, to, outcomes, byAgent, deciders, expiredUndecided, multiPersonApproved, decisionSecondsMedian, decisionSecondsMax}`. Every approver, early ones included, is counted under `deciders`.
 
-The bundle carries no signature of its own: every part is signed, and verifiers recompute the summary. Each request's `policyVersion` is part of its digest when present.
+The bundle carries no signature of its own: every part is signed, and verifiers recompute the summary. Each request's `policyVersion` is part of its digest when present, and so is `requiredApprovals` when above 1 (Phase 16).
 
 ### 8.2 Admission webhooks
 | Webhook | Path | Sees | Answers |
 |---|---|---|---|
 | `workloads.guard.sentinel.dev` (validating, fail closed) | `/admission/workloads` | agents' (by `matchConditions`) UPDATE/DELETE of workloads and scale subresources; DELETE of common objects; opt-in CREATE | allowed (approved/readmitted/observe/auto, or a dry run, with a warning) or 403 with the request id and the approve command. Audit annotations: `verdict`, `action`, `request` |
-| `approvals.guard.sentinel.dev` (mutating, fail closed) | `/admission/approvals` | every ActionRequest CREATE/UPDATE/DELETE | the guard's own SA: allowed; others: only `spec.decision` (`approve`/`deny`) once, plus `decisionNote`, patched with `decidedBy`/`decidedAt` from the authenticated user |
+| `approvals.guard.sentinel.dev` (mutating, fail closed) | `/admission/approvals` | every ActionRequest CREATE/UPDATE/DELETE | the guard's own SA: allowed; others: only `spec.decision` (`approve`/`deny`) once, plus `decisionNote`, patched with `decidedBy`/`decidedAt` from the authenticated user. When more approvals are needed (Phase 16), an `approve` is patched into `spec.approvals` (`{by, at, note}`, the authenticated user) and `spec.decision` is removed, with a warning "approval k of N recorded …"; the same user twice is refused; `spec.approvals` can't be written directly |
 
 ### 8.3 kubectl plugin
 `kubectl sentinel requests [--all] [-o json]` · `describe <id>` · `approve <id> [-m note]` · `deny <id> [-m note]` · `audit verify` (exit 2 on any problem) · `audit export` (the evidence bundle to stdout; Phase 14) · `audit verify --bundle <file> [--jwks <keys>] [--previous <older bundle>]` (offline, no cluster access; `--previous` also requires the bundle to extend the older one) · `version`. Flags: `--guard-namespace`, `--context`, `--kubeconfig`.
@@ -263,4 +267,9 @@ The bundle carries no signature of its own: every part is signed, and verifiers 
 - `ActionRequest.spec.decidedVia`: the delegate, now in the CRD schema. Before, the API server pruned it, so Kubernetes-mode delegated decisions kept the delegate only in the event detail.
 - ConfigMap `sentinel-guard-policies`: one key `<version>.json` per policy version, a signed `PolicyRecord`.
 - ConfigMap `sentinel-guard-audit-head`: now also `at`, `kid`, `sig` (the signed checkpoint).
+
+### 8.5 Two-person approvals (Phase 16)
+- Policy: `approvals: N` per action or in `defaults` (1 to 5; unset means 1 and leaves the policy version as it was). `approvers: {users, groups}`: who may decide over HTTP with an OIDC identity.
+- `ActionRequest.spec.requiredApprovals` (set only when N > 1) and `spec.approvals[]` (`{by, via?, at, note?}`, the approvals before the last).
+- Audit event `approval-added` (actor: the person; detail: the note, plus `[via delegate]`). The request stays `Pending`; the last approval is the usual `approved` event.
 

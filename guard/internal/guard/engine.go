@@ -289,6 +289,9 @@ func (e *Engine) create(ctx context.Context, p Proposal, ap ActionPolicy, phase 
 		CreatedAt: now, Phase: phase, Reasons: reasons, Preconditions: checks,
 		ExpiresAt: now.Add(e.Policy().PendingTTL.Duration), PolicyVersion: e.PolicyVersion(),
 	}
+	if phase == PhasePending && ap.Approvals > 1 {
+		r.RequiredApprovals = ap.Approvals
+	}
 	typ, actor, detail := EventRequested, p.Agent, ""
 	switch phase {
 	case PhaseBlocked:
@@ -542,6 +545,18 @@ func (e *Engine) Spend(ctx context.Context, token, executor string) (*Request, *
 	return r, claims, err
 }
 
+// CanApprove adds the rule for approvals of requests that need several people: nobody counts twice.
+func CanApprove(r *Request, person string) error {
+	if r.ApprovedBy(person) {
+		return fmt.Errorf("%w: %s already approved %s; it needs %d more approval(s) from other people",
+			ErrForbidden, person, r.ID, r.Needed()-len(r.Approvals))
+	}
+	return nil
+}
+
+// Partial reports whether an approval of r now would be one of several, not the decision itself.
+func Partial(r *Request) bool { return len(r.Approvals)+1 < r.Needed() }
+
 // CanDecide is the rule for a human decision, shared by the HTTP API and the Kubernetes approval
 // webhook: only an open, undecided, unexpired request, never by the agent that asked.
 func CanDecide(r *Request, decider string, isAgent bool, now time.Time) error {
@@ -561,24 +576,112 @@ func CanDecide(r *Request, decider string, isAgent bool, now time.Time) error {
 // Decide records a human decision (HTTP API) and applies it. via is the delegate that
 // authenticated the decider (empty when the decider called directly); neither may be the requester.
 func (e *Engine) Decide(ctx context.Context, id, decider string, groups []string, via string, approve bool, note string) (*Request, error) {
-	now := e.Now()
 	isAgent := e.Policy().IsAgent(decider, groups)
-	if _, err := e.Store.Update(ctx, id, func(r *Request) error {
-		if err := CanDecide(r, decider, isAgent, now); err != nil {
+	check := func(r *Request) error {
+		if err := CanDecide(r, decider, isAgent, e.Now()); err != nil {
 			return err
 		}
 		if via != "" && via == r.Agent {
 			return fmt.Errorf("%w: the requesting identity cannot decide its own request", ErrForbidden)
 		}
-		r.Decision, r.DecidedBy, r.DecidedVia, r.DecisionNote, r.DecidedAt = "deny", decider, via, note, &now
 		if approve {
-			r.Decision = "approve"
+			return CanApprove(r, decider)
 		}
 		return nil
-	}); err != nil {
-		return nil, err
 	}
-	return e.Finalize(ctx, id)
+	// Two people approving at once may both think theirs is not the last approval: the second
+	// write then finds the first and retries as the decision.
+	for attempt := 0; ; attempt++ {
+		cur, err := e.Store.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if approve && Partial(cur) {
+			r, err := e.addApproval(ctx, cur, Approval{By: decider, Via: via, Note: note}, check)
+			if errors.Is(err, errStale) && attempt < 3 {
+				continue
+			}
+			return r, err
+		}
+		_, err = e.Store.Update(ctx, id, func(r *Request) error {
+			if err := check(r); err != nil {
+				return err
+			}
+			if approve && Partial(r) {
+				return errStale
+			}
+			now := e.Now()
+			r.Decision, r.DecidedBy, r.DecidedVia, r.DecisionNote, r.DecidedAt = "deny", decider, via, note, &now
+			if approve {
+				r.Decision = "approve"
+			}
+			return nil
+		})
+		if errors.Is(err, errStale) && attempt < 3 {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return e.Finalize(ctx, id)
+	}
+}
+
+// addApproval records one person's approval of a request that needs more than one: an
+// approval-added event, the request staying Pending.
+func (e *Engine) addApproval(ctx context.Context, r *Request, a Approval, check func(*Request) error) (*Request, error) {
+	a.At = e.Now().UTC()
+	return e.transition(ctx, r, EventApprovalAdded, a.By, approvalDetail(a), func(x *Request) error {
+		if err := check(x); err != nil {
+			return err
+		}
+		if !Partial(x) {
+			return errStale // another approval arrived first: this one is the decision now
+		}
+		x.Approvals = append(x.Approvals, a)
+		return nil
+	})
+}
+
+func approvalDetail(a Approval) string {
+	d := a.Note
+	if a.Via != "" {
+		d = strings.TrimSpace(d + " [via " + a.Via + "]")
+	}
+	return d
+}
+
+// recordedApprovals counts a request's approval-added events.
+func recordedApprovals(r *Request) int {
+	n := 0
+	for _, ev := range r.Audit {
+		if ev.Type == EventApprovalAdded {
+			n++
+		}
+	}
+	return n
+}
+
+// recordApprovals signs the approvals written through the Kubernetes API (the approval webhook
+// adds them to spec.approvals) that have no event yet.
+func (e *Engine) recordApprovals(ctx context.Context, r *Request) (*Request, error) {
+	for i := recordedApprovals(r); i < len(r.Approvals); i = recordedApprovals(r) {
+		a := r.Approvals[i]
+		next, err := e.transition(ctx, r, EventApprovalAdded, a.By, approvalDetail(a), func(x *Request) error {
+			if x.Phase != PhasePending || recordedApprovals(x) != i || len(x.Approvals) <= i {
+				return errStale
+			}
+			return nil
+		})
+		if errors.Is(err, errStale) {
+			return e.Store.Get(ctx, r.ID) // another replica recorded it
+		}
+		if err != nil {
+			return nil, err
+		}
+		r = next
+	}
+	return r, nil
 }
 
 // Finalize applies a recorded decision: Pending becomes Approved (with its execution window) or
@@ -593,8 +696,17 @@ func (e *Engine) Finalize(ctx context.Context, id string) (*Request, error) {
 }
 
 func (e *Engine) finalize(ctx context.Context, r *Request) (*Request, error) {
-	if r.Phase != PhasePending || r.Decision == "" {
+	if r.Phase != PhasePending {
 		return r, nil
+	}
+	r, err := e.recordApprovals(ctx, r)
+	if err != nil || r.Phase != PhasePending || r.Decision == "" {
+		return r, err
+	}
+	if r.Decision == "approve" && (Partial(r) || r.ApprovedBy(r.DecidedBy)) {
+		// The approval webhook records early approvals itself; one written straight into the
+		// store (or by an older guard) is turned into an approval here, never into the decision.
+		return e.demote(ctx, r)
 	}
 	id := r.ID
 	typ := EventDenied
@@ -620,6 +732,32 @@ func (e *Engine) finalize(ctx context.Context, r *Request) (*Request, error) {
 		return e.Store.Get(ctx, id) // another replica finalized it
 	}
 	return r2, err
+}
+
+// demote turns a recorded "approve" that isn't enough on its own into one person's approval.
+func (e *Engine) demote(ctx context.Context, r *Request) (*Request, error) {
+	a := Approval{By: r.DecidedBy, Via: r.DecidedVia, Note: r.DecisionNote}
+	if r.DecidedAt != nil {
+		a.At = *r.DecidedAt
+	}
+	undecide := func(x *Request) {
+		x.Decision, x.DecidedBy, x.DecidedVia, x.DecisionNote, x.DecidedAt = "", "", "", "", nil
+	}
+	if r.ApprovedBy(a.By) { // the same person again: drop it
+		return e.Store.Update(ctx, r.ID, func(x *Request) error { undecide(x); return nil })
+	}
+	r, err := e.transition(ctx, r, EventApprovalAdded, a.By, approvalDetail(a), func(x *Request) error {
+		if x.Phase != PhasePending || x.Decision != "approve" || x.DecidedBy != a.By {
+			return errStale
+		}
+		undecide(x)
+		x.Approvals = append(x.Approvals, a)
+		return nil
+	})
+	if errors.Is(err, errStale) {
+		return e.Store.Get(ctx, r.ID)
+	}
+	return r, err
 }
 
 func (e *Engine) expire(ctx context.Context, req *Request) (*Request, error) {
@@ -648,7 +786,7 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 	var errs []error
 	for _, r := range reqs {
 		switch {
-		case r.Phase == PhasePending && r.Decision != "":
+		case r.Phase == PhasePending && (r.Decision != "" || recordedApprovals(r) < len(r.Approvals)):
 			_, err = e.Finalize(ctx, r.ID)
 		case r.Phase.Open() && !now.Before(r.ExpiresAt):
 			_, err = e.expire(ctx, r)

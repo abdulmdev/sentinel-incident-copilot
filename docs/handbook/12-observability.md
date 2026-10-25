@@ -83,6 +83,7 @@ Alert-opened incidents keep one trace too: the webhook's request span continues 
 | `sentinel_guard_audit_last_verified_timestamp_seconds` | sentinel-guard | gauge | When this replica last verified the chain (every `SENTINEL_GUARD_VERIFY_INTERVAL`, default 5 min) |
 | `sentinel_guard_audit_head_seq` | sentinel-guard | gauge | The chain head's sequence. It only grows; `SentinelGuardAuditHeadWentBack` fires if it goes down |
 | `sentinel_guard_policy_info` | sentinel-guard | gauge `{version}` | 1 for the policy version in force (first 12 hex characters) |
+| `sentinel_guard_notifications_total` | sentinel-guard | counter `{result}` | Notices to the notification webhook: `sent`, `failed` (after two retries), `dropped` (queue full). Only with `SENTINEL_GUARD_NOTIFY_URL` (Phase 16) |
 
 Scrape targets: gateway and ingestion `/actuator/prometheus`; agent `/metrics`; chaos-lab `/metrics`; sentinel-guard `:9090/metrics` (`serviceMonitor.enabled` in its chart). Rule evaluation every 5 s; alerts go to Alertmanager (`:9093`), which posts to the gateway (chapter 06 B.4, chapter 13).
 

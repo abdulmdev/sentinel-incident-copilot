@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -235,8 +236,8 @@ func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, ser
 		if keyPEM, err = guard.GenerateKeyPEM(); err != nil {
 			return err
 		}
-		agents, admin, delegates := memoryTokens(log)
-		srv.Agents, srv.AdminToken = agents, admin
+		agents, admin, delegates, people := memoryTokens(log)
+		srv.Agents, srv.AdminToken, srv.ApproverTokens = agents, admin, people
 		policy.Delegates.Users = append(policy.Delegates.Users, delegates...)
 		if addr == "" {
 			addr = ":8080"
@@ -254,6 +255,20 @@ func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, ser
 		prober = &guard.PrometheusProber{URL: policy.Prometheus.URL, Client: &http.Client{Timeout: 3 * time.Second}}
 	}
 	srv.Engine = guard.NewEngine(st, signer, prober, policy)
+	if issuer := os.Getenv("SENTINEL_GUARD_OIDC_ISSUER"); issuer != "" {
+		audience := os.Getenv("SENTINEL_GUARD_OIDC_AUDIENCE")
+		if audience == "" {
+			return errors.New("SENTINEL_GUARD_OIDC_AUDIENCE is required with SENTINEL_GUARD_OIDC_ISSUER")
+		}
+		srv.OIDC = &server.OIDC{Issuer: issuer, Audience: audience,
+			UsernameClaim: os.Getenv("SENTINEL_GUARD_OIDC_USERNAME_CLAIM"), GroupsClaim: os.Getenv("SENTINEL_GUARD_OIDC_GROUPS_CLAIM")}
+		log.Info("people's OIDC tokens are verified", "issuer", issuer, "audience", audience,
+			"approverUsers", policy.Approvers.Users, "approverGroups", policy.Approvers.Groups)
+	}
+	if url := os.Getenv("SENTINEL_GUARD_NOTIFY_URL"); url != "" {
+		srv.Notify = server.NewNotifier(url, os.Getenv("SENTINEL_GUARD_PUBLIC_URL"), log, reg)
+		go srv.Notify.Run(ctx)
+	}
 	srv.Hook()
 	// Keep the policy version in force, signed, so every decision can be traced to its rules.
 	if err := srv.Engine.RecordPolicy(ctx); err != nil {
@@ -336,9 +351,10 @@ func run(log *slog.Logger, mode, policyPath, addr, apiAddr, metricsAddr, ns, ser
 	return httpSrv.Shutdown(shutdown)
 }
 
-// memoryTokens reads agent and admin tokens from the environment, or generates them and prints
-// them once (single-process mode is for trying the guard out).
-func memoryTokens(log *slog.Logger) (server.StaticTokens, string, []string) {
+// memoryTokens reads agent, delegate, approver and admin tokens from the environment, or generates
+// an agent and an admin token and prints them once (single-process mode is for trying the guard out).
+// With personal approver tokens there is no shared admin token unless one is set explicitly.
+func memoryTokens(log *slog.Logger) (server.StaticTokens, string, []string, server.StaticTokens) {
 	agents := server.StaticTokens{}
 	for _, pair := range strings.Split(os.Getenv("SENTINEL_GUARD_AGENT_TOKENS"), ",") {
 		if name, token, ok := strings.Cut(strings.TrimSpace(pair), "="); ok && name != "" && token != "" {
@@ -354,18 +370,31 @@ func memoryTokens(log *slog.Logger) (server.StaticTokens, string, []string) {
 			delegates = append(delegates, name)
 		}
 	}
+	// People who decide with their own token: each decision is recorded as that person.
+	people := server.StaticTokens{}
+	for _, pair := range strings.Split(os.Getenv("SENTINEL_GUARD_APPROVER_TOKENS"), ",") {
+		if name, token, ok := strings.Cut(strings.TrimSpace(pair), "="); ok && name != "" && token != "" {
+			people[token] = name
+		}
+	}
 	admin := os.Getenv("SENTINEL_GUARD_ADMIN_TOKEN")
 	if len(agents) == 0 {
 		token := randomToken()
 		agents[token] = "demo-agent"
 		fmt.Fprintf(os.Stderr, "\n  Sentinel Guard (memory mode) generated tokens for trying it out:\n    agent \"demo-agent\": %s\n", token)
 	}
-	if admin == "" {
+	if admin == "" && len(people) == 0 {
 		admin = randomToken()
 		fmt.Fprintf(os.Stderr, "    approver (admin):   %s\n  Set SENTINEL_GUARD_AGENT_TOKENS=name=token,... and SENTINEL_GUARD_ADMIN_TOKEN to choose your own.\n\n", admin)
 	}
-	log.Info("memory mode: state is kept in this process only", "tokens", len(agents), "delegates", delegates)
-	return agents, admin, delegates
+	approvers := make([]string, 0, len(people))
+	for _, name := range people {
+		approvers = append(approvers, name)
+	}
+	slices.Sort(approvers)
+	log.Info("memory mode: state is kept in this process only", "tokens", len(agents), "delegates", delegates,
+		"approvers", approvers, "adminToken", admin != "")
+	return agents, admin, delegates, people
 }
 
 func randomToken() string {
