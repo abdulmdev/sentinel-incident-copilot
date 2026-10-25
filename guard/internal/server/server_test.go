@@ -44,7 +44,7 @@ func newServer(t *testing.T) (*Server, *store.Memory) {
 	s := &Server{
 		Engine: guard.NewEngine(mem, signer, nil, p), Agents: StaticTokens{"agent-token": "refund-bot"},
 		AdminToken: "admin-token", GuardUser: guardUser, Metrics: NewMetrics(prometheus.NewRegistry()),
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), RecheckAfter: time.Millisecond,
 	}
 	s.Generation = func(context.Context, schema.GroupVersionResource, string, string) (int64, error) { return 4, nil }
 	s.Hook()

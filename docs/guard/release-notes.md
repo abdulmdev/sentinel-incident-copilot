@@ -61,6 +61,6 @@ helm upgrade sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --vers
   - an agent change waiting for approval: 7.5 ms;
   - a human's change: 6.1 ms.
 - **The `docker compose` quickstart:** 29/29 checks in CI.
-- **329 automated tests.**
+- **330 automated tests.**
 
 Docs: [docs/guard/README.md](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md) · design: [handbook chapter 17](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/handbook/17-lld-sentinel-guard.md) · decisions: [ADR-0010](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/adr/0010-sentinel-guard.md) to [ADR-0018](https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/adr/0018-a-stable-api-for-v2.md)

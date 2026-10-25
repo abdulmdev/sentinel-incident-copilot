@@ -24,7 +24,12 @@ cleanup() {
 }
 trap cleanup EXIT
 ok() { PASS=$((PASS+1)); echo "  ✓ $*"; }
-die() { echo "  ✗ $*" >&2; exit 1; }
+die() {
+  echo "  ✗ $*" >&2
+  # The cluster is deleted on exit: show the guard's side of it first.
+  kubectl -n sentinel-system logs -l app.kubernetes.io/name=sentinel-guard --tail=40 --prefix 2>/dev/null | grep -vE '"msg":"audit"' | tail -60 >&2 || true
+  exit 1
+}
 
 echo "Building the guard image and the kubectl plugin"
 (cd guard && go build -trimpath -o "$BIN/kubectl-sentinel" ./cmd/kubectl-sentinel && go build -o "$BIN/loadgen" ./test/loadgen)
@@ -200,7 +205,9 @@ for _ in $(seq 1 120); do   # until the API server reaches a guard again (pods r
 done
 grep -q "needs human approval" <<<"$out" || die "the guard did not come back: $out"
 ok "guard back: answering again $(( $(date +%s) - T0 ))s after scaling up from zero"
-if kubectl sentinel audit verify | grep -q "Audit chain OK"; then ok "audit chain intact after the outage"; else die "audit chain intact after the outage"; fi
+if kubectl sentinel audit verify > "$WORK/verify-outage.txt" 2>&1 && grep -q "Audit chain OK" "$WORK/verify-outage.txt"; then
+  ok "audit chain intact after the outage"
+else die "audit chain intact after the outage: $(cat "$WORK/verify-outage.txt")"; fi
 kubectl sentinel audit export > "$WORK/later.json"
 if kubectl-sentinel audit verify --bundle "$WORK/later.json" --jwks "$WORK/jwks.json" --previous "$WORK/archived.json" | grep -q "nothing recorded there was removed"; then
   ok "a later export extends the archived one: nothing removed or changed"

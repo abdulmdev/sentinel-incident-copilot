@@ -796,6 +796,12 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
 - **Found by the new upgrade job in CI:** right after the guards restart, `kubectl sentinel approve` could answer "recorded … not applied yet". It waited 15 s for the guard to apply the decision, exactly the housekeeping lease's duration, which may still be free at that point.
   - The plugin now waits up to 30 s.
   - The test checks what matters to a user: the agent's retry is admitted once. A retry applies a recorded decision itself.
+- **Found by CI, then by reading the code: a verification could catch a write in flight.**
+  - The guard claims an event's place in the chain (the signed head) before it writes the request. A verification that reads in between sees the head a step ahead of the newest event, and reports a problem.
+  - The e2e's "audit chain intact after the outage" check failed this way once. It runs right after the guard scales back from zero, when the API server may have stopped waiting for a slow first write that the guard then finishes.
+  - The same window could set `sentinel_guard_audit_chain_ok` to 0 for a whole verify interval, and fire a false `SentinelGuardAuditChainBroken`.
+  - The fix: `kubectl sentinel audit verify` and the self-verification re-read once, 3 s later, before reporting. A write in flight completes within the webhook timeout; real tampering is still there (tested both ways).
+  - The e2e now prints the verify output and the guard's logs on any failure; the failed run had shown neither.
 - **A test race fixed:** `TestNotifications` read the `sent` counter before the notifier had counted its second delivery. The sink records a notice before its answer reaches the notifier. It now waits for the count, and passed 20 runs in a row under the race detector.
 
 ---

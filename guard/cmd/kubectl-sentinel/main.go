@@ -390,16 +390,34 @@ func (c *client) evidence(ctx context.Context) (*guard.Evidence, error) {
 }
 
 func (c *client) verify(ctx context.Context) error {
+	rep, err := c.verifyOnce(ctx)
+	if err != nil || rep.OK {
+		if err != nil {
+			return err
+		}
+		return report(rep, false)
+	}
+	// The guard claims an event's place in the chain before it writes the request: a write in flight
+	// (for example one the API server stopped waiting for) can show the head a step ahead of the
+	// newest event for a moment. Read again before reporting; a real problem is still there.
+	time.Sleep(3 * time.Second)
+	if rep, err = c.verifyOnce(ctx); err != nil {
+		return err
+	}
+	return report(rep, false)
+}
+
+func (c *client) verifyOnce(ctx context.Context) (guard.EvidenceReport, error) {
 	ev, err := c.evidence(ctx)
 	if err != nil {
-		return err
+		return guard.EvidenceReport{}, err
 	}
 	b, _ := json.Marshal(ev.JWKS)
 	keys, err := guard.ParseJWKS(b)
 	if err != nil {
-		return err
+		return guard.EvidenceReport{}, err
 	}
-	return report(guard.VerifyEvidence(ev, keys), false)
+	return guard.VerifyEvidence(ev, keys), nil
 }
 
 func (c *client) export(ctx context.Context) error {

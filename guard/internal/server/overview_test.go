@@ -1,10 +1,14 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/abdulmdev/sentinel-incident-copilot/guard/internal/guard"
+	"github.com/abdulmdev/sentinel-incident-copilot/guard/internal/store"
 )
 
 func TestOverviewShowsTheWholePicture(t *testing.T) {
@@ -43,5 +47,34 @@ func TestOverviewShowsTheWholePicture(t *testing.T) {
 	_ = json.Unmarshal(get(h, "/v1/overview", "admin-token").Body.Bytes(), &ov)
 	if ov.Chain == nil || !ov.Chain.OK || ov.Chain.Events == 0 || ov.Chain.At.IsZero() {
 		t.Fatalf("the record's health, from the last self-verification: %+v", ov.Chain)
+	}
+}
+
+// headAheadOnce shows the chain head one step ahead on its first read, as a write in flight does
+// (its place in the chain is claimed before the request is written).
+type headAheadOnce struct {
+	*store.Memory
+	reads int
+}
+
+func (s *headAheadOnce) Head(ctx context.Context) (guard.Head, error) {
+	h, err := s.Memory.Head(ctx)
+	if s.reads++; s.reads == 1 {
+		h.Seq++
+	}
+	return h, err
+}
+
+func TestSelfVerificationRereadsBeforeRaisingTheAlarm(t *testing.T) {
+	s, mem := newServer(t)
+	h := s.Handler()
+	proposeAPI(t, h, "refund", "order-1")
+	s.Engine.Store = &headAheadOnce{Memory: mem}
+	s.selfVerify(t.Context())
+	if testutil.ToFloat64(s.Metrics.ChainOK) != 1 {
+		t.Fatal("a moment's inconsistency from a write in flight must not report the chain broken")
+	}
+	if v := s.lastVerify.Load(); v == nil || !v.OK {
+		t.Fatalf("last verification: %+v", v)
 	}
 }

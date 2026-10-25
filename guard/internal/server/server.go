@@ -65,6 +65,9 @@ type Server struct {
 	Ready      func() bool
 	Version    string
 
+	// RecheckAfter: how long self-verification waits to re-read before reporting a failure (default 3 s).
+	RecheckAfter time.Duration
+
 	lastVerify atomic.Pointer[Verification] // the guardian monitor's last full verification
 }
 

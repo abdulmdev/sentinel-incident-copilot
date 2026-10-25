@@ -353,6 +353,8 @@ A **details view** (a `<dialog>`) opens from any card, activity line or history 
 
 ## 15. A stable API (v2.0.0)
 - **The CRD serves `sentinel.dev/v1`** (stored) and `v1alpha1` (deprecated). Both versions have the same schema, so the API server serves either without a conversion webhook. The store, the plugin and the guard's own objects use `v1`.
+- **Verifying while the guard writes:** an event's place in the chain is claimed (the head advances) before its request is written. So a verification that reads in between can see the head a step ahead of the newest event. `kubectl sentinel audit verify` and the self-verification re-read once, 3 s later, before reporting a problem (v2.0.0). A write in flight finishes within the webhook timeout (5 s); tampering doesn't go away.
+
 - **A startup check** (`cmd/sentinel-guard`): in Kubernetes mode the guard asks discovery whether `sentinel.dev/v1` is served. If not, it exits with the fix: apply the chart's CRD file, because `helm upgrade` never updates CRDs.
 - **The promise** ([ADR-0018](../adr/0018-a-stable-api-for-v2.md)): within v2, the v1 API, the action API and the evidence format only gain optional fields, and records from any v2 release keep verifying. Records from the alphas verify too: the upgrade test checks the events alpha.3 signed (chapter 14 §4C).
 

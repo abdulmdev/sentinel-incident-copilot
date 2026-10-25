@@ -34,6 +34,14 @@ func (s *Server) Monitor(ctx context.Context, tick, verifyEvery time.Duration) {
 	}
 }
 
+// recheckAfter is how long self-verification waits before confirming a failure (short in tests).
+func (s *Server) recheckAfter() time.Duration {
+	if s.RecheckAfter > 0 {
+		return s.RecheckAfter
+	}
+	return 3 * time.Second
+}
+
 func (s *Server) observe(ctx context.Context) {
 	reqs, err := s.Engine.Store.List(ctx)
 	if err != nil {
@@ -62,6 +70,17 @@ func (s *Server) observe(ctx context.Context) {
 
 func (s *Server) selfVerify(ctx context.Context) {
 	rep, err := s.Engine.Verify(ctx)
+	if err == nil && !rep.OK {
+		// An event's place is claimed before its request is written, so a write in flight can show
+		// the head a step ahead of the newest event for a moment: read again before raising the alarm.
+		t := time.NewTimer(s.recheckAfter())
+		select {
+		case <-ctx.Done(): // shutting down: confirm with what can still be read
+		case <-t.C:
+		}
+		t.Stop()
+		rep, err = s.Engine.Verify(ctx)
+	}
 	if err != nil {
 		s.Log.Warn("audit self-verification could not run", "error", err)
 		return

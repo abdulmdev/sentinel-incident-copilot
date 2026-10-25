@@ -98,7 +98,7 @@ Scrape targets: gateway and ingestion `/actuator/prometheus`; agent `/metrics`; 
 
 | Alert | Expression (abridged) | Severity |
 |---|---|---|
-| `SentinelGuardAuditChainBroken` | `min(sentinel_guard_audit_chain_ok) == 0` for 1 m | critical |
+| `SentinelGuardAuditChainBroken` | `min(sentinel_guard_audit_chain_ok) == 0` for 1 m (a failure is confirmed by a re-read 3 s later, so a write in flight doesn't trip it; v2.0.0) | critical |
 | `SentinelGuardAuditNotVerified` | last verification older than 30 min, for 5 m | warning |
 | `SentinelGuardAuditHeadWentBack` | head below its 1 h maximum, for 5 m | critical |
 | `SentinelGuardApprovalBacklog` | oldest pending > 30 min, for 5 m | warning |
