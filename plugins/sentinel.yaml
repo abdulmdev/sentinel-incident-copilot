@@ -3,7 +3,7 @@ kind: Plugin
 metadata:
   name: sentinel
 spec:
-  version: v2.0.0-alpha.2
+  version: v2.0.0-alpha.3
   homepage: https://github.com/abdulmdev/sentinel-incident-copilot
   shortDescription: Approve AI agent actions guarded by Sentinel Guard
   description: |
@@ -16,8 +16,8 @@ spec:
         matchLabels:
           os: linux
           arch: amd64
-      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.2/kubectl-sentinel_linux_amd64.tar.gz
-      sha256: 1db87411b15ec2afe4b0b66357cde9ab2932d76eefaf61ffc86e92e5cd7c42bb
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.3/kubectl-sentinel_linux_amd64.tar.gz
+      sha256: 4cb746cf7bba5f0154bb3cced60e5bd17f0c59c0bf827f48041d1fe685ec4fef
       files:
         - from: kubectl-sentinel
           to: .
@@ -28,8 +28,8 @@ spec:
         matchLabels:
           os: linux
           arch: arm64
-      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.2/kubectl-sentinel_linux_arm64.tar.gz
-      sha256: 04a74c22ce0e0c5a60174a318f3b1ecbafc13dc70bc8d3a23d708fbc1234e338
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.3/kubectl-sentinel_linux_arm64.tar.gz
+      sha256: ad0b400d9242e4938c1b1178d8c0ebd2ed34554ebcaa07fa7a9a559aa3880056
       files:
         - from: kubectl-sentinel
           to: .
@@ -40,8 +40,8 @@ spec:
         matchLabels:
           os: darwin
           arch: amd64
-      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.2/kubectl-sentinel_darwin_amd64.tar.gz
-      sha256: 0e9df76aae1042a07f1b43ad1bb58ad8fce542ed8cf545d8df33ae14c3271e84
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.3/kubectl-sentinel_darwin_amd64.tar.gz
+      sha256: 7753ed91d597e8ade85dc1bdb6549234785cbbaa86c45cca35870ea3c4a1ac80
       files:
         - from: kubectl-sentinel
           to: .
@@ -52,8 +52,8 @@ spec:
         matchLabels:
           os: darwin
           arch: arm64
-      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.2/kubectl-sentinel_darwin_arm64.tar.gz
-      sha256: 4bb119952284277f9e6c604408bc4357a770c99d4605e97e6b0a1ad8938b4a96
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.3/kubectl-sentinel_darwin_arm64.tar.gz
+      sha256: 2df41eda4cf899d93c9d99f54ac899770bf9b3118a2012768de1c6abb1a901e0
       files:
         - from: kubectl-sentinel
           to: .
@@ -64,8 +64,8 @@ spec:
         matchLabels:
           os: windows
           arch: amd64
-      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.2/kubectl-sentinel_windows_amd64.tar.gz
-      sha256: 988991e547e1c82b525fb43e1a2d68f6cebeeb019a2541cde0afe27628ff2d06
+      uri: https://github.com/abdulmdev/sentinel-incident-copilot/releases/download/v2.0.0-alpha.3/kubectl-sentinel_windows_amd64.tar.gz
+      sha256: 35ad1cecf946316a19b3682175eba7fdb2175b5ea0e620025c472497f4a4cbbe
       files:
         - from: kubectl-sentinel.exe
           to: .
