@@ -14,9 +14,10 @@ Sentinel Guard is Sentinel's safe-action core (approval → single-use capabilit
 | `kubectl-sentinel` | `guard/cmd/kubectl-sentinel` | The kubectl plugin: `requests`, `describe`, `approve`, `deny`, `audit verify`, `audit export`, and offline `audit verify --bundle` |
 | Core | `guard/internal/guard` | Request lifecycle (`engine.go`), policy (`policy.go`), change classification (`classify.go`), capabilities and signatures (`signer.go`), audit chain (`audit.go`), evidence bundle and oversight summary (`evidence.go`), Prometheus preconditions (`precondition.go`) |
 | Storage | `guard/internal/store` | `Memory` (one process) and `Kube` (ActionRequest objects, watch cache, compare-and-swap writes) |
-| Transport | `guard/internal/server` | HTTP handlers, both webhooks, metrics, the guardian monitor (`monitor.go`) |
+| Transport | `guard/internal/server` | HTTP handlers, both webhooks, metrics, the guardian monitor (`monitor.go`), the approvals inbox (`inbox.go` + `inbox/`, single-process mode) |
 | Kubernetes glue | `guard/internal/kube` | Creates its TLS certificate and signing key on first start, keeps the webhook CA bundles, publishes the JWKS, TokenReview authentication |
-| Chart | `deploy/helm/sentinel-guard` | CRD, 3 replicas + PDB, RBAC (the guard, approvers, viewers), both webhook configurations, policy ConfigMap |
+| Chart | `deploy/helm/sentinel-guard` | CRD, 3 replicas + PDB, RBAC (the guard, approvers, viewers), both webhook configurations, policy ConfigMap; optional PrometheusRule (`alerts/`) and Grafana dashboard (`dashboards/`) |
+| Quickstart | `compose.yaml`, `examples/quickstart/` | The guard, a demo agent, and optionally Prometheus and Grafana, in one `docker compose up` (§12) |
 | Default policy | `guard/policies/default.yaml` | Embedded in the binary |
 
 One static Go binary (37.5 MB linux/amd64, stripped); the image is 11.5 MB compressed on distroless `static:nonroot`.
@@ -232,3 +233,34 @@ Design record: [ADR-0014](../adr/0014-governance-evidence-and-guardian-monitorin
 **Measured** (`BenchmarkVerifyEvidence`, Apple M1 Pro): verifying 1,000 approved-and-executed requests (3,000 events) takes **about 0.18 s**, almost all of it ECDSA verification. The bundle is **about 2.1 KB per request** (compact JSON).
 
 **Bug found and fixed.** The CRD schema lacked `spec.decidedVia`, so the API server pruned it. Delegated decisions in Kubernetes mode (the copilot's path since Phase 11) kept the delegate only in the signed event's detail. The schema now has `decidedVia` and `policyVersion`; the e2e checks that `policyVersion` survives.
+
+## 12. The quickstart and the approvals inbox (Phase 15)
+
+![The docker compose quickstart: the guard, a live agent, and the optional monitoring profile](images/17-guard-quickstart.png)
+
+*Figure 17.7: The docker compose quickstart: the guard, a live agent, and the optional monitoring profile*
+
+**The demo agent** (`examples/quickstart/agent.py`) is a small event loop over the synchronous SDK, not a framework. Every second it polls its waiting requests:
+- **Once approved**, it redeems the capability (`spend`) and only then "issues" the refund. After every third approval it spends the same capability again and logs the 409.
+- **Once denied**, it logs the decider and note.
+- **A 404 for its own request** means a restarted memory-mode guard forgot it, so it asks again.
+
+It keeps at most `MAX_WAITING` (3) requests open and queues the rest. That way the inbox never floods, and the oldest-pending gauge and backlog alert behave as they would with a real queue.
+
+**The inbox** (`server/inbox.go`) is mounted by `handler()` only when `AdminToken` is set:
+- `GET /` redirects to `/inbox/`.
+- `http.FileServerFS` serves the embedded `inbox/` directory, wrapped to add the CSP, `nosniff`, `no-referrer` and `no-cache` headers.
+- The page is three static files (18 KB), and the script uses only the existing API:
+  - `GET /v1/actions` every 2 s while signed in;
+  - `POST /v1/actions/{id}/approve|deny` with `{approver, note}`;
+  - `GET /v1/audit/verify`;
+  - `GET /v1/audit/export`, saved through a blob URL so the token never appears in a link.
+- Pending cards are reconciled by request id rather than re-rendered, so a half-typed note survives the refresh.
+- Agent-supplied strings only ever reach `textContent` or attribute values set with `setAttribute`. `TestInboxIsServedOnlyWithHTTPApprovals` keeps it that way by refusing HTML sinks in the script.
+
+![The approvals inbox in the quickstart: three refunds waiting, recent outcomes (receipts on policy, erasures blocked, one refund approved and executed), and the chain verified](images/screens/guard-inbox.png)
+
+*Figure 17.8: The approvals inbox in the quickstart: three refunds waiting, recent outcomes (receipts on policy, erasures blocked, one refund approved and executed), and the chain verified*
+
+**What it costs:** 136 KB of binary (stripped, darwin/arm64 build), and no route at all in Kubernetes mode.
+

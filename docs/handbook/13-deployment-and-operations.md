@@ -282,6 +282,8 @@ Install: `helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-gu
 | `KUBERNETES_SERVICE_HOST` | set by Kubernetes | Only used to pick the default mode |
 | `SENTINEL_GUARD_NAMESPACE` | `sentinel-system` | kubectl plugin: where the guard runs (or `--guard-namespace`) |
 
+Flags without a variable: `-version`, and `-healthcheck` (Phase 15): probe `http://127.0.0.1<SENTINEL_GUARD_ADDR>/readyz` and exit 0 when ready. The image is distroless (no shell, no curl), so this is what container health checks call.
+
 ### 8.2 Chart values (`deploy/helm/sentinel-guard`)
 | Value | Default | Purpose |
 |---|---|---|
@@ -294,6 +296,7 @@ Install: `helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-gu
 | `api.plainHTTP`, `api.port` | false, 8080 | Also serve the action API in-cluster over plain HTTP (no webhooks) |
 | `auditors.users`, `auditors.groups` | `[]` | Identities that may call `GET /v1/audit/export` and `/v1/audit/verify`, e.g. a CronJob that archives evidence (Phase 14) |
 | `prometheusRule.enabled`, `prometheusRule.labels` | false, `{}` | Install the guardian alert rules as a PrometheusRule (Prometheus Operator); labels to match your Prometheus `ruleSelector` (Phase 14) |
+| `grafanaDashboard.enabled`, `.namespace`, `.labels` | false, the release namespace, `{grafana_dashboard: "1"}` | The Sentinel Guard dashboard as a ConfigMap for Grafana's dashboard sidecar (Phase 15; chapter 12 §3) |
 | `createNamespace` | false | Render the Namespace (used for `install.yaml`) |
 | `networkPolicy.enabled`, `serviceMonitor.enabled` | false, false | Optional extras |
 | `image.repository`, `image.tag` | `ghcr.io/abdulmdev/sentinel-guard`, the chart's appVersion | |
@@ -309,6 +312,8 @@ Install: `helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-gu
 - **Break-glass:** `kubectl delete validatingwebhookconfiguration sentinel-guard` stops enforcement (re-apply the chart to restore). The deletion is in the Kubernetes audit log.
 - **Rotate the TLS certificate or signing key:** delete the Secret (`sentinel-guard-tls` / `sentinel-guard-signing`) and restart the pods. A new signing key invalidates outstanding capabilities and starts a new key id; events signed with the old key verify only while its public key is still published (key history is on the roadmap, chapter 16).
 - **Release:** pushing a `v2.*` tag runs `.github/workflows/release-guard.yml`: signed multi-arch image with SBOM and provenance, OCI chart, `install.yaml`, the plugin for 5 platforms, the krew manifest. Afterwards, commit the release's `sentinel.yaml` as `plugins/sentinel.yaml`: that directory makes this repository a krew index (`kubectl krew index add sentinel <repo>.git`). First release: `v2.0.0-alpha.1` (2026-10-23); the image and chart pull anonymously from GHCR.
+  - Since Phase 15, the release also signs the chart with cosign and attaches the Python wheel and sdist (the tag's version in PEP 440 form: `2.0.0-alpha.3` → `2.0.0a3`) and the npm tarball.
+  - Three channels are opt-in, per repository variable: `PUBLISH_PYPI=true` and `PUBLISH_NPM=true` publish through trusted publishing, in GitHub environments `pypi` and `npm`, with no stored token; `ARTIFACTHUB_REPOSITORY_ID` pushes the chart's Artifact Hub metadata. Each needs a one-time step on the registry: [publishing](../guard/publishing.md).
 
 ### 8.4 The copilot on the guard (Phase 11)
 The `sentinel` chart depends on `sentinel-guard` (`deploy/helm/sentinel/Chart.yaml`, `file://../sentinel-guard`; `helm dependency build` first, which `kind-up.sh` and CI do). The `sentinel-guard:` block in `values.yaml`:
@@ -351,3 +356,20 @@ Unknown keys and modes are rejected at start.
   - `post-create.sh` adds kind v0.33.0 and uv, then runs `guard-demo.sh setup`;
   - `.demo/bin` is on `PATH`, so `kubectl sentinel` works in the terminal;
   - the default 2-core machine is enough for both demos.
+
+### 8.7 The docker compose quickstart (Phase 15)
+`compose.yaml` at the repository root (project `sentinel-guard-quickstart`). The copilot's full stack is `deploy/docker-compose.yml`, §2.2.
+
+| Service | Image | Notes |
+|---|---|---|
+| `guard` | built from `guard/` (`sentinel-guard:quickstart`) | memory mode, `examples/walkthrough/policy.yaml`, verify interval 30 s; health check `-healthcheck`; `127.0.0.1:${GUARD_PORT:-8080}` |
+| `agent` | built from `examples/quickstart/agent.Dockerfile` (the SDK from `sdk/python`; `agent.Dockerfile.dockerignore` keeps the context to four paths) | waits for a healthy guard; `restart: unless-stopped`; runs as 65532 |
+| `prometheus` (profile `monitoring`) | `prom/prometheus:v3.5.0` | scrapes `guard:9090` every 5 s; mounts the chart's `alerts/guard-alerts.yaml`; `127.0.0.1:${PROMETHEUS_PORT:-9090}` |
+| `grafana` (profile `monitoring`) | `grafana/grafana:12.1.0` | anonymous viewer, no login form, analytics off; opens on the chart's `dashboards/sentinel-guard.json`; `127.0.0.1:${GRAFANA_PORT:-3000}` |
+
+Variables: `APPROVER_TOKEN` (`approve-me`), `AGENT_TOKEN` (`agent-demo-token`), `TICKET_EVERY` (20 s), and the three ports.
+
+Measured on an M1 Pro with Docker Desktop:
+- The first `docker compose --profile monitoring up -d --build --wait` took 1 min 53 s: building both images and pulling Prometheus and Grafana. Docker's build cache may already have held base layers from earlier work on this machine, so a truly fresh machine takes longer.
+- With everything cached it is ready in 6 s.
+- Image sizes (arm64, uncompressed): guard 55 MB, demo agent 208 MB, Prometheus 423 MB, Grafana 905 MB.

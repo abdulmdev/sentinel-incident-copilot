@@ -1,0 +1,6 @@
+# Only what the demo agent's image needs.
+*
+!sdk/python/pyproject.toml
+!sdk/python/README.md
+!sdk/python/sentinel_guard/*.py
+!examples/quickstart/agent.py

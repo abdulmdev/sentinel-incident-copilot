@@ -3,7 +3,12 @@ name: release-guard
 # Tag v2.x.y[-pre] → Sentinel Guard release:
 #   image   ghcr.io/<owner>/sentinel-guard:<version> (linux/amd64+arm64, SBOM + provenance, cosign-signed)
 #   chart   oci://ghcr.io/<owner>/charts/sentinel-guard --version <version>
-#   assets  kubectl-sentinel for 5 platforms, checksums, the krew manifest, install.yaml
+#   assets  kubectl-sentinel for 5 platforms, checksums, the krew manifest, install.yaml,
+#           the Python SDK (wheel + sdist) and the TypeScript SDK (npm tarball)
+# Publishing beyond GitHub is off until the repository opts in (Settings → Variables):
+#   PUBLISH_PYPI=true             PyPI, by trusted publishing (no token): docs/guard/publishing.md
+#   PUBLISH_NPM=true              npm, by trusted publishing, with provenance
+#   ARTIFACTHUB_REPOSITORY_ID=…   the chart's Artifact Hub metadata (verified publisher)
 on:
   push:
     tags: ["v2.*"]
@@ -28,6 +33,9 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
 
       - name: Version
         id: v
@@ -72,14 +80,45 @@ jobs:
           done
           cd ../dist && sha256sum *.tar.gz > checksums.txt && cat checksums.txt
 
-      - name: Chart (OCI) and install.yaml
+      - name: Chart (OCI, signed) and install.yaml
+        env: { CHARTS: "${{ steps.v.outputs.charts }}" }
         run: |
           V=${{ steps.v.outputs.version }}
-          sed -i "s/^version: .*/version: $V/; s/^appVersion: .*/appVersion: $V/" deploy/helm/sentinel-guard/Chart.yaml
+          C=deploy/helm/sentinel-guard/Chart.yaml
+          sed -i "s/^version: .*/version: $V/; s/^appVersion: .*/appVersion: $V/" $C
+          sed -i "s|^  artifacthub.io/prerelease: .*|  artifacthub.io/prerelease: \"${{ steps.v.outputs.prerelease }}\"|" $C
+          sed -i "s|image: ghcr.io/abdulmdev/sentinel-guard:.*|image: ${{ steps.v.outputs.image }}:$V|" $C
           helm package deploy/helm/sentinel-guard -d dist
-          helm push dist/sentinel-guard-$V.tgz ${{ steps.v.outputs.charts }}
+          helm push dist/sentinel-guard-$V.tgz ${{ steps.v.outputs.charts }} 2>&1 | tee dist/helm-push.log
+          DIGEST=$(sed -n 's/^Digest: //p' dist/helm-push.log)
+          cosign sign --yes "${CHARTS#oci://}/sentinel-guard@$DIGEST" 2>&1 | tail -2
+          rm dist/helm-push.log
           helm template sentinel-guard deploy/helm/sentinel-guard -n sentinel-system --include-crds \
             --set createNamespace=true --set image.repository=${{ steps.v.outputs.image }} > dist/install.yaml
+
+      - name: Artifact Hub repository metadata
+        if: vars.ARTIFACTHUB_REPOSITORY_ID != ''
+        env: { CHARTS: "${{ steps.v.outputs.charts }}" }
+        run: |
+          curl -sSL https://github.com/oras-project/oras/releases/download/v1.2.3/oras_1.2.3_linux_amd64.tar.gz | tar -xz -C /usr/local/bin oras
+          printf 'repositoryID: %s\nowners:\n  - name: %s\n' "${{ vars.ARTIFACTHUB_REPOSITORY_ID }}" "${{ github.repository_owner }}" > artifacthub-repo.yml
+          oras push "${CHARTS#oci://}/sentinel-guard:artifacthub.io" \
+            --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+            artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+
+      - name: SDK packages
+        run: |
+          V=${{ steps.v.outputs.version }}
+          # PEP 440 for Python: 2.0.0-alpha.3 -> 2.0.0a3, -beta.1 -> b1, -rc.1 -> rc1
+          PY=$(echo "$V" | sed -E 's/-alpha\.?/a/; s/-beta\.?/b/; s/-rc\.?/rc/')
+          sed -i "s/^version = .*/version = \"$PY\"/" sdk/python/pyproject.toml
+          (cd sdk/python && uv build --out-dir ../../dist/sdk)
+          (cd sdk/typescript && npm ci && npm version --no-git-tag-version --allow-same-version "$V" && npm run build \
+            && npm pack --pack-destination ../../dist/sdk)
+          ls -l dist/sdk
+
+      - uses: actions/upload-artifact@v4
+        with: { name: sdk, path: dist/sdk }
 
       - name: krew manifest
         run: python3 scripts/krew_manifest.py "${{ steps.v.outputs.version }}" dist/checksums.txt "$REPO" > dist/sentinel.yaml
@@ -90,4 +129,37 @@ jobs:
           PRE=""; [ "${{ steps.v.outputs.prerelease }}" = true ] && PRE="--prerelease"
           gh release create "$GITHUB_REF_NAME" $PRE --title "Sentinel Guard ${{ steps.v.outputs.version }}" \
             --notes-file docs/guard/release-notes.md \
-            dist/kubectl-sentinel_*.tar.gz dist/checksums.txt dist/install.yaml dist/sentinel.yaml dist/sentinel-guard-*.tgz
+            dist/kubectl-sentinel_*.tar.gz dist/checksums.txt dist/install.yaml dist/sentinel.yaml dist/sentinel-guard-*.tgz \
+            dist/sdk/*
+
+  # The SDKs on PyPI and npm, once the repository opts in (see the top of this file). Both use trusted
+  # publishing: the registries trust this workflow's OIDC identity, so no token is stored anywhere.
+  pypi:
+    needs: release
+    if: vars.PUBLISH_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions: { id-token: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: sdk, path: dist }
+      - run: mkdir -p py && mv dist/*.whl dist/*.tar.gz py/ && ls py
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with: { packages-dir: py }
+
+  npm:
+    needs: release
+    if: vars.PUBLISH_NPM == 'true'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions: { id-token: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: sdk, path: dist }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, registry-url: "https://registry.npmjs.org" }
+      - run: npm install -g npm@11
+      - name: Publish (prereleases under the "next" tag)
+        run: |
+          TAG=latest; case "$GITHUB_REF_NAME" in *-*) TAG=next;; esac
+          npm publish dist/*.tgz --access public --tag "$TAG"

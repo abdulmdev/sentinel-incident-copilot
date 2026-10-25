@@ -1,0 +1,17 @@
+flowchart TB
+  H(["you, in a browser"])
+  subgraph compose["docker compose up (repository root)"]
+    direction TB
+    A["agent: a support desk on the Python SDK<br/>receipts run on policy · refunds wait for you · erasures are blocked"]
+    G["guard, memory mode<br/>action API + approvals inbox on localhost:8080<br/>metrics on :9090"]
+    subgraph mon["--profile monitoring"]
+      direction LR
+      P["Prometheus<br/>the chart's alert and recording rules"]
+      F["Grafana on localhost:3000<br/>Sentinel Guard dashboard"]
+    end
+  end
+  A -- "propose, wait, spend once" --> G
+  H -- "approve once or deny" --> G
+  P -- "scrape" --> G
+  F -- "query" --> P
+  H -.-> F

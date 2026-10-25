@@ -113,6 +113,7 @@
         <div class="stat"><b>11.5 MB</b><span>one Go binary, no database: state lives in the Kubernetes API</span></div>
       </div>
       <p><b>Provable to others.</b> <code>kubectl sentinel audit export</code> writes one evidence file: every request, its signed events, the policy version it was decided under, the signed chain head. Anyone can verify it offline, and an edited copy fails, naming the record. Every replica re-verifies the chain itself, and tested alert rules flag drift in each agent's behaviour. <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/compliance/README.md">How this maps to the EU AI Act and the NIST AI RMF →</a></p>
+      <p><b>Try it in one command.</b> From a clone, <code>docker compose up</code> starts the guard and a support-desk agent working behind it. Open <code>localhost:8080</code> (token <code>approve-me</code>): every refund waits for you in the approvals inbox, receipts go out on policy, and erasures are never allowed. <code>--profile monitoring</code> adds Prometheus with the drift alerts and a Grafana dashboard. <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/examples/quickstart/README.md">Quickstart →</a></p>
       <p class="note"><code>helm install sentinel-guard oci://ghcr.io/abdulmdev/charts/sentinel-guard --version 2.0.0-alpha.2 -n sentinel-system --create-namespace</code> · then <code>kubectl sentinel approve &lt;id&gt;</code> · <a href="https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md">Sentinel Guard docs →</a></p>
     </div>
   </section>
@@ -218,6 +219,7 @@
       <tr><td>9 · Publish and measure</td><td>Full local-LLM benchmark; runbook preconditions take gemma4 from 11.6% to 0% harmful actions</td></tr>
       <tr><td>10–13 · Sentinel Guard</td><td>The safety core for any agent: Kubernetes admission, SDKs and an MCP proxy, the copilot on it, SafeActionBench</td></tr>
       <tr><td>14 · Governance</td><td>Signed evidence export verifiable offline, policy versions, guardian alerts on agent drift, EU AI Act / NIST AI RMF mapping, one-click Codespaces demo</td></tr>
+      <tr><td>15 · Try it, ship it</td><td><code>docker compose up</code> with a live agent, an approvals inbox in the guard, a Grafana dashboard for the guard, signed charts and SDK packages on every release</td></tr>
     </table>
   </section>
 

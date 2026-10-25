@@ -29,3 +29,6 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.hatch.build.targets.sdist]
+include = ["sentinel_guard", "tests", "README.md"]

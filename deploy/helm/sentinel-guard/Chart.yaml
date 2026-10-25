@@ -25,6 +25,10 @@ annotations:
       name: actionrequests.sentinel.dev
       displayName: ActionRequest
       description: An action an AI agent proposed, its approval and its audit trail.
+  artifacthub.io/images: |
+    - name: sentinel-guard
+      image: ghcr.io/abdulmdev/sentinel-guard:2.0.0-alpha.2
+      platforms: [linux/amd64, linux/arm64]
   artifacthub.io/links: |
     - name: Documentation
       url: https://github.com/abdulmdev/sentinel-incident-copilot/blob/main/docs/guard/README.md

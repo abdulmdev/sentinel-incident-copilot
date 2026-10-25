@@ -227,7 +227,8 @@ Design: [chapter 17](17-lld-sentinel-guard.md). Port 8443 (TLS) in Kubernetes, 8
 | `GET /v1/audit/verify` | admin token, or an **auditor** (policy `auditors`; Phase 14) | `{ok, events, requests, headSeq, voided, policies, problems[], warnings[]}` |
 | `GET /v1/audit/export` | admin token, or an auditor (Phase 14) | the evidence bundle (below), with `Content-Disposition: attachment; filename="sentinel-guard-evidence-<UTC time>.json"` |
 | `GET /.well-known/jwks.json` | none | ES256 public key (`kid` = thumbprint) |
-| `GET /healthz`, `/readyz` | none | readiness waits for the watch cache and bootstrap |
+| `GET /healthz`, `/readyz` | none | readiness waits for the watch cache and bootstrap. `sentinel-guard -healthcheck` probes `/readyz` on `SENTINEL_GUARD_ADDR` and exits 0 or 1, for health checks in the shell-less image (Phase 15) |
+| `GET /` → `302 /inbox/`; `GET /inbox/`, `/inbox/inbox.js`, `/inbox/inbox.css` | none to load; the page then calls the API above with the admin token | the approvals inbox (Phase 15), **only when an admin token is set** (single-process mode; 404 in Kubernetes). Served with `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` |
 
 **The change map** binds the approval: the guard fingerprints `change` exactly as sent. The SDKs send a canonical form (strings as they are, anything else compact JSON with sorted keys), identical in Python and TypeScript, so an approval matches either SDK (Phase 12).
 

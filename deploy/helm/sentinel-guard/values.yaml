@@ -84,3 +84,11 @@ serviceMonitor:
 prometheusRule:
   enabled: false
   labels: {}   # e.g. {release: kube-prometheus-stack}, to match your Prometheus ruleSelector
+
+# The Sentinel Guard Grafana dashboard (dashboards/sentinel-guard.json), as a ConfigMap that
+# Grafana's dashboard sidecar picks up (kube-prometheus-stack watches the label below by default).
+grafanaDashboard:
+  enabled: false
+  namespace: ""   # default: the release namespace; set it to where your Grafana's sidecar looks
+  labels:
+    grafana_dashboard: "1"

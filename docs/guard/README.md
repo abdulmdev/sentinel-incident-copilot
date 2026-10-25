@@ -11,7 +11,24 @@ Guard is the safety core of [Sentinel](../../README.md) (approval → single-use
 
 > **Status: v2.0.0-alpha.2.** The design and the safety properties are tested on a real API server in CI (31 checks, below). Treat the API and the CRD (`v1alpha1`) as subject to change.
 
-## Try it in one minute (Docker, no cluster)
+## Try it in one command (Docker, no cluster)
+From a clone of the repository:
+
+```bash
+docker compose up
+```
+
+That builds and starts the guard and a support-desk agent working behind it. Open **http://localhost:8080** and sign in with the approver token `approve-me`:
+- receipts go out on policy alone, and are recorded;
+- each refund waits for you in the inbox: *Approve once* or *Deny*, with a note;
+- the agent can never delete customer data, so it hands those tickets to a person;
+- now and then it reuses a spent capability, and the guard refuses (`docker compose logs -f agent`).
+
+The inbox also verifies the audit chain and downloads the evidence bundle. Add `--profile monitoring` for Prometheus, loaded with the chart's alert rules (`localhost:9090`), and the Sentinel Guard dashboard in Grafana (`localhost:3000`). More in [examples/quickstart](../../examples/quickstart/README.md).
+
+![The approvals inbox, with the demo agent's refunds waiting](../handbook/images/screens/guard-inbox.png)
+
+### Or one container, driven with curl
 The same guard runs as a single process with an HTTP API: an agent asks before acting, a human approves, and the agent gets a single-use capability that the executor redeems.
 
 ```bash
@@ -44,6 +61,8 @@ The executor (whatever performs the refund) redeems it just before acting. A sec
 ```bash
 curl -s -X POST localhost:8080/v1/capabilities/spend -d '{"capability":"<token>","executor":"payments"}'
 ```
+
+Instead of the curl approval, you can open http://localhost:8080 and decide in the inbox (with `approver-secret`). The inbox ships in the guard from 2.0.0-alpha.3.
 
 Single-process mode keeps state in memory: it's for trying Guard out and for tests. In production, run it in Kubernetes.
 
@@ -165,6 +184,7 @@ Preconditions are checked by the guard against your telemetry. An agent's own ev
 | `GET /v1/audit/verify` | the admin token, or an **auditor** (policy `auditors`) | verify the audit chain |
 | `GET /v1/audit/export` | the admin token, or an auditor | the evidence bundle: every request, the signed head, every policy version, the public keys |
 | `GET /.well-known/jwks.json` | anyone | the guard's public key (capabilities are ES256 JWTs) |
+| `GET /` (the approvals inbox) | a person with the admin token | single-process mode only: decide in a browser instead of with curl (below) |
 
 In Kubernetes, agents authenticate with their ServiceAccount token (verified with a TokenReview); approvals are Kubernetes objects, so they follow your RBAC. A capability binds the request, action, target, the approved parameters (`change`) and approver, and expires with the approval.
 
@@ -190,6 +210,7 @@ Sentinel's incident console works this way. With `api.plainHTTP: true` the guard
   - per-agent drift: bursts of blocked attempts, a rising share blocked or denied, people overriding an agent, an agent suddenly needing approval for what it used to do on policy.
   
   The rules are in [`alerts/guard-alerts.yaml`](../../deploy/helm/sentinel-guard/alerts/guard-alerts.yaml), unit-tested with `promtool`.
+- **Dashboard.** `--set grafanaDashboard.enabled=true` adds the Sentinel Guard dashboard as a ConfigMap that Grafana's sidecar loads (label `grafana_dashboard: "1"`, as kube-prometheus-stack expects). It shows the chain's health, what waits for a person and for how long, each agent's outcomes and drift ratios, and firing guard alerts.
 - **Auditors.** List identities under `auditors` (chart values) to let them call `GET /v1/audit/export`, for example a CronJob that archives evidence monthly.
 
 What this maps to in the EU AI Act and the NIST AI RMF, and what stays yours: [docs/compliance](../compliance/README.md).
@@ -237,6 +258,8 @@ The end-to-end suite (`scripts/guard-e2e.sh`, run in CI) passes 31 checks agains
 - Retention: `ActionRequest` objects are kept (they are the audit record), about 2 KB per request. Export and archive them (`kubectl sentinel audit export`); there is no compaction yet.
 - The audit chain head is a single ConfigMap: every event is serialized through it. That's fine at human-approval rates, but it's not a high-volume event log.
 - One cluster per guard. API-mode agents in single-process mode keep state in memory only.
+- The inbox is for single-process mode: one shared approver token, and a self-declared name for the audit trail. With several approvers, use Kubernetes (`kubectl sentinel approve`, identities from the API server) or a delegate that signs people in.
+- The SDKs install from the repository (`pip install "sentinel-guard @ git+…"`) or from the release assets until they are published to PyPI and npm ([publishing](publishing.md)).
 - Only the operations in the table above are guarded by default. Add more with `webhook.extraRules` (they're classified as `update` or `delete`).
 
 More: the design and threat model in the [engineering handbook, chapter 17](../handbook/17-lld-sentinel-guard.md), and the decision record [ADR-0010](../adr/0010-sentinel-guard.md).

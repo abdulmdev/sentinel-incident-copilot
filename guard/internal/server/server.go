@@ -1,5 +1,6 @@
 // Package server exposes the guard over HTTP: the action API for agents and executors, the two
-// Kubernetes admission webhooks, the public keys and metrics.
+// Kubernetes admission webhooks, the public keys and metrics, and (single-process mode) the
+// approvals inbox.
 package server
 
 import (
@@ -84,6 +85,7 @@ func (s *Server) handler(admission bool) http.Handler {
 	mux.HandleFunc("POST /v1/capabilities/spend", s.spend)
 	mux.HandleFunc("GET /v1/audit/verify", s.auditors(s.verify))
 	mux.HandleFunc("GET /v1/audit/export", s.auditors(s.export))
+	s.mountInbox(mux)
 	if admission {
 		mux.HandleFunc("POST /admission/workloads", s.timed("workloads", s.admitWorkload))
 		mux.HandleFunc("POST /admission/approvals", s.timed("approvals", s.admitApproval))

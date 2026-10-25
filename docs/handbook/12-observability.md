@@ -127,6 +127,26 @@ Attempts are `proposed + blocked + auto_approved`: each proposal ends as exactly
 
 Datasources: Prometheus (`uid prometheus`, default) and Jaeger (`uid jaeger`).
 
+### Sentinel Guard dashboard (Phase 15)
+`deploy/helm/sentinel-guard/dashboards/sentinel-guard.json`, 17 panels in three rows, filterable by agent:
+1. **Oversight and integrity:** the chain's self-verification and when it last ran; requests pending and the oldest one's age; approvals not yet redeemed; the chain head.
+2. **What agents' proposals came to:**
+   - outcomes over time, and a table by agent, action and outcome;
+   - the rejected share and the share needing a person, last hour against 7 days (the recording rules behind the drift alerts).
+3. **Guard:**
+   - firing `SentinelGuard*` alerts;
+   - admission latency p99 (Kubernetes only);
+   - verdicts by source;
+   - the policy version in force.
+
+It ships two ways:
+- In the chart, with `grafanaDashboard.enabled=true`: a ConfigMap labelled `grafana_dashboard: "1"`, which Grafana's sidecar loads.
+- In the quickstart's `--profile monitoring`. CI checks that every query names a guard series and that the chart renders the ConfigMap.
+
+![The Sentinel Guard dashboard in the docker compose quickstart, with the demo agent running at a ticket every 3 s. Its erasure attempts (blocked by policy) set off SentinelGuardAgentBlockedBurst](images/screens/guard-grafana.png)
+
+*Figure 12.9: The Sentinel Guard dashboard in the docker compose quickstart, with the demo agent running at a ticket every 3 s. Its erasure attempts (blocked by policy) set off SentinelGuardAgentBlockedBurst*
+
 ## 4. Logs
 Structured app logs to stdout (Spring Boot default format; uvicorn). Notable lines:
 - ingestion `indexed tenant=… doc=… chunks=N`;
@@ -139,7 +159,7 @@ chaos-lab logs are JSON lines.
 
 ![k6 load test: measured p95 latency against the thresholds](images/12-chart-latency.png)
 
-*Figure 12.9: k6 load test: measured p95 latency against the thresholds*
+*Figure 12.10: k6 load test: measured p95 latency against the thresholds*
 
 | Symptom | Look at |
 |---|---|

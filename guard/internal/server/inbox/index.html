@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Sentinel Guard inbox</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="inbox.css">
+<script src="inbox.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="mark" aria-hidden="true">◆</span> Sentinel Guard <span class="muted">approvals</span></div>
+  <div id="who" class="who" hidden>
+    <span class="muted">deciding as</span> <strong id="who-name"></strong>
+    <button id="sign-out" class="link" type="button">sign out</button>
+  </div>
+</header>
+
+<main>
+  <section id="sign-in" class="card narrow" hidden>
+    <h1>Sign in</h1>
+    <p class="muted">This guard runs in single-process mode. The approver token is the one in
+      <code>SENTINEL_GUARD_ADMIN_TOKEN</code> (the guard prints a generated one when it starts).
+      The token stays in this tab only.</p>
+    <form id="sign-in-form">
+      <label>Approver token <input id="token" type="password" autocomplete="off" required></label>
+      <label>Your name, for the audit trail <input id="name" type="text" autocomplete="name" placeholder="alice@example.com" required></label>
+      <button type="submit" class="primary">Open inbox</button>
+      <p id="sign-in-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="app" hidden>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <section>
+      <h2>Waiting for you <span id="pending-count" class="count">0</span></h2>
+      <div id="pending" class="list"></div>
+      <p id="pending-empty" class="empty">Nothing is waiting. Agents' requests that need a person appear here as they arrive.</p>
+    </section>
+
+    <section>
+      <h2>Recent</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>When</th><th>Agent</th><th>Action</th><th>Target</th><th>Outcome</th><th>Decided by</th></tr></thead>
+          <tbody id="recent"></tbody>
+        </table>
+      </div>
+      <p id="recent-empty" class="empty">No decisions yet.</p>
+    </section>
+
+    <section class="card">
+      <h2>Audit trail</h2>
+      <p class="muted">Every request, decision and execution is a signed, hash-chained event. Verify the chain here, or
+        download the evidence bundle and check it anywhere with <code>kubectl sentinel audit verify --bundle</code>.</p>
+      <div class="row">
+        <button id="verify" type="button">Verify the chain</button>
+        <button id="export" type="button">Download evidence</button>
+      </div>
+      <pre id="audit" class="audit" hidden></pre>
+    </section>
+  </div>
+</main>
+
+<template id="request-card">
+  <article class="card request">
+    <div class="request-head">
+      <span class="risk"></span>
+      <strong class="action"></strong>
+      <span class="muted">on</span>
+      <code class="target"></code>
+      <span class="spacer"></span>
+      <span class="expires muted"></span>
+    </div>
+    <p class="intent"></p>
+    <dl class="change"></dl>
+    <ul class="checks"></ul>
+    <p class="meta muted"></p>
+    <form class="decide">
+      <input class="note" type="text" placeholder="Note for the audit trail (optional)" maxlength="500">
+      <button type="submit" class="primary" value="approve">Approve once</button>
+      <button type="submit" class="danger" value="deny">Deny</button>
+    </form>
+  </article>
+</template>
+</body>
+</html>

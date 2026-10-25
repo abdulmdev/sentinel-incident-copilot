@@ -645,7 +645,55 @@ The gate was proven by re-introducing the bug: it failed with exit code 1. The r
   - post-create installs kind v0.33.0 and uv and builds the demo;
   - inside it, the walkthrough passes all 13 assertions;
   - kind, Helm v4.3.1, `kubectl sentinel` and Docker-in-Docker (29.9.2) all run.
-- **305 automated tests** (Go 34 → 49).
+- **306 automated tests** (Go 34 → 50). *Corrected in Phase 15: this entry first said 305 and 49, from a miscount of the Go test functions (38, not 37).*
+
+---
+
+## Phase 15: Try it, ship it
+**Goal:** make Sentinel Guard something a developer can try in one command and then install from the registries they already use, without a cluster or curl.
+
+**Built**
+- **`docker compose up` at the repository root:**
+  - the guard (memory mode, the walkthrough's policy) and a support-desk agent on the Python SDK, working through tickets indefinitely: receipts on policy, refunds waiting for a person, erasures blocked, and now and then a spent capability replayed and refused;
+  - `--profile monitoring` adds Prometheus, which loads the chart's own alert and recording rules, and Grafana, which opens on the guard dashboard;
+  - fixed demo tokens; every port bound to 127.0.0.1.
+- **An approvals inbox in the guard** (single-process mode only):
+  - `GET /` opens a static page embedded in the binary. It shows each request's change, intent, risk, the guard's precondition observations and the policy version, and offers *Approve once* / *Deny* with a note.
+  - It also lists recent outcomes, verifies the chain and downloads the evidence bundle.
+  - Strict CSP and no HTML sinks.
+- **The Sentinel Guard Grafana dashboard:** 17 panels on oversight, integrity, per-agent outcomes and drift, and firing alerts. The chart ships it (`grafanaDashboard.enabled`) and so does the quickstart.
+- **`sentinel-guard -healthcheck`:** a health check for the shell-less image.
+- **Release packaging:**
+  - every release signs the chart with cosign and attaches the Python wheel and sdist and the npm tarball;
+  - PyPI and npm jobs (trusted publishing, no stored token) and the Artifact Hub metadata push run once the repository sets `PUBLISH_PYPI`, `PUBLISH_NPM` or `ARTIFACTHUB_REPOSITORY_ID`;
+  - the one-time registry steps are in [docs/guard/publishing.md](../guard/publishing.md).
+- **CI:**
+  - a `quickstart` job brings the compose stack up and runs `examples/quickstart/check.py` (18 checks);
+  - `deploy-config` checks the dashboard;
+  - `sdks` builds the release packages.
+
+**Decisions** (ADR-0015):
+- **The guard gets the repository root's compose file:** it is what most people try first. The copilot's stack keeps `deploy/docker-compose.yml`.
+- **An inbox in the guard, but only where the admin token is the authority.** In Kubernetes, people approve through the API server, whose identities are authenticated. The inbox is plain DOM with no dependencies or build step, so it can't drift from the API it calls.
+- **Publishing is built and tested now, switched on by the maintainer per registry.** The workflow never holds a registry token.
+
+**Bugs found and fixed**
+
+| Found | How | Fix |
+|---|---|---|
+| The inbox header showed "deciding as · sign out" to a signed-out visitor | The first screenshot of the page | `.who { display: flex }` overrode the `hidden` attribute. A global `[hidden] { display: none !important }` |
+| The demo agent lost the refunds it was waiting on when the guard restarted: each status call got 404, which the SDK reports as the guard being unavailable, so the agent retried forever | Restarting the guard to load a fix | The agent treats a 404 for its own request as "the guard forgot it" (memory mode) and asks again. Checked by restarting the guard mid-run |
+| The Python SDK's sdist was 140 KB: it shipped the 418 KB `uv.lock` (compressed) | Building the release packages locally | `[tool.hatch.build.targets.sdist] include` (package, tests, README): 13 KB |
+| The dashboard's tables showed a raw `Time` column, and two stat titles were cut off | The dashboard screenshot | An `organize` transformation hides it, and the titles are shorter |
+| Phase 14's entry said 49 Go tests and 305 in total; the exact figures were 50 and 306 | Counting the Go tests per function and subtest (`go test -json`) for this phase | Corrected above and in chapter 14 |
+
+**Results** (2026-10-25):
+- **Quickstart: 18/18 checks**, including the monitoring profile, on the first run and on a clean re-run.
+  - The first `up` took 1 min 53 s (building both images, pulling Prometheus and Grafana); 6 s with everything cached.
+  - At a ticket every 3 s, `SentinelGuardAgentBlockedBurst` fired within minutes from the agent's erasure attempts: the alert doing its job on live traffic.
+- **The inbox:** 18 KB of HTML, CSS and script; the guard binary grows by 136 KB with it.
+- **Release packages:** wheel 11 KB, sdist 13 KB, npm tarball 4 KB. `actionlint` reports no errors in either workflow.
+- **307 automated tests** (Go 50 → 51).
 
 ---
 

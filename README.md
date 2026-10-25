@@ -54,7 +54,15 @@ Approved ar-c8f4166c-1: scale of shop/deployment/checkout (replicas: 2 → 3), b
 
 Also `kubectl apply -f install.yaml`, `docker run ghcr.io/abdulmdev/sentinel-guard` (single process, HTTP API for agents outside Kubernetes), and `kubectl krew install sentinel/sentinel`. **[Sentinel Guard docs →](docs/guard/README.md)**
 
-**Try it in a minute:** open the repository in GitHub Codespaces (button above) and run `scripts/guard-demo.sh`, or run it locally (Go and Python, no Docker). A refund agent asks; a person approves; it runs exactly once; a replay is refused; the record is exported, verified offline, and an edited copy is caught. [What it shows →](examples/walkthrough/README.md)
+**Try it in one command,** from a clone:
+
+```bash
+docker compose up
+```
+
+Then open http://localhost:8080 (token `approve-me`). A support-desk agent works through tickets behind the guard: receipts go out on policy, every refund waits for you in the inbox (*Approve once* or *Deny*), and erasure requests are never allowed. Add `--profile monitoring` for Prometheus with the guard's drift alerts, and a Grafana dashboard. [Quickstart →](examples/quickstart/README.md)
+
+Or open the repository in GitHub Codespaces (button above) and run `scripts/guard-demo.sh`, a scripted minute: a person approves, the action runs exactly once, a replay is refused, and the record is exported, verified offline and caught when edited. [What it shows →](examples/walkthrough/README.md)
 
 ## 📊 SafeActionBench: how often do agents' actions cause harm?
 
@@ -123,7 +131,7 @@ When production breaks, the on-call engineer's first 10–30 minutes go to gathe
 | **Local LLM (gemma4 8B)**, same 112 incidents | it proposes a harmful fix in **33.9%** of incidents; the guardrails let **0%** through (62.5% correct; every unsafe proposal escalates instead) |
 | **The eval caught a real bug** | the first baseline rolled back harmless deploys in **16%** of incidents → fixed to **0%**; CI now fails on regression |
 | **Load** (k6) | incidents p95 **314 ms** at 5/s; search p95 **18 ms** at 20/s; a 200-request burst admits **exactly 120** (distributed limiter) |
-| **Quality gates** | **305** automated tests (incl. 49 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 31 Guard checks on a real API server, promtool-tested alert rules and an asserted walkthrough; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
+| **Quality gates** | **307** automated tests (incl. 51 for Sentinel Guard, 25 for its SDKs, 13 for SafeActionBench), plus 31 Guard checks on a real API server, promtool-tested alert rules, an asserted walkthrough and a checked `docker compose` quickstart; CI with a real Kubernetes end-to-end run, green on the first push (only the paid Claude eval job is skipped: no key) |
 
 ## Why it's interesting to build
 
@@ -224,7 +232,7 @@ cd guard && go test -race ./...
 LOAD=1 scripts/guard-e2e.sh
 ```
 
-CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers on real pgvector/Redis), the benchmark gate (main + held-out), docs-sync checks, Helm/kubeconform/Terraform validation, a least-privilege secrets check, and a **real kind cluster end to end** (incident → approve → `RESOLVED`, NetworkPolicy denials), and the **Sentinel Guard end to end** (31 checks, a load run, the guard taken down), then publishes multi-arch images.
+CI ([workflow](.github/workflows/ci.yml)) runs all test suites (Testcontainers on real pgvector/Redis), the benchmark gate (main + held-out), docs-sync checks, Helm/kubeconform/Terraform validation, a least-privilege secrets check, and a **real kind cluster end to end** (incident → approve → `RESOLVED`, NetworkPolicy denials), and the **Sentinel Guard end to end** (31 checks, a load run, the guard taken down), and the **`docker compose` quickstart** (18 checks, with Prometheus and Grafana), then publishes multi-arch images.
 
 ## Where to look in the code (5-minute tour)
 
@@ -262,6 +270,7 @@ Nine phases, each with its goal, decisions, **bugs found and fixed**, and measur
 | 12 SDKs and the MCP proxy | Python and TypeScript SDKs, a LangChain/LangGraph wrapper and a zero-code MCP proxy, tested against the real guard |
 | 13 SafeActionBench | The incident benchmark as an open benchmark for any agent and any guard; an independent guard alone took a small model from 33.9% to 0% harmful |
 | 14 Governance and compliance | A signed evidence export anyone can verify offline, policy versions, signed checkpoints, guardian alerts on agent drift (tested with promtool), the EU AI Act / NIST AI RMF mapping, and a one-click Codespaces demo |
+| 15 Try it, ship it | `docker compose up` with a live agent, an approvals inbox in the guard, the guard's Grafana dashboard, signed charts and SDK packages on every release, with PyPI/npm/Artifact Hub publishing ready to switch on |
 
 <details>
 <summary><b>All design decisions and their reasons</b></summary>

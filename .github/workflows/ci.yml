@@ -75,6 +75,29 @@ jobs:
         run: npm ci && npm run build && npm test
       - name: The walkthrough demo (what Codespaces runs; every step asserts its result)
         run: scripts/guard-demo.sh
+      - name: Release packages build (what release-guard.yml attaches and, when enabled, publishes)
+        run: |
+          (cd sdk/python && uv build --out-dir "$RUNNER_TEMP/sdk")
+          (cd sdk/typescript && npm pack --pack-destination "$RUNNER_TEMP/sdk")
+          ls -l "$RUNNER_TEMP/sdk"
+
+  quickstart:
+    # `docker compose up` at the repository root, as a newcomer runs it: the guard, the demo agent,
+    # the inbox, and the monitoring profile (Prometheus with the chart's rules, Grafana's dashboard).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: docker compose --profile monitoring up
+        run: TICKET_EVERY=3 docker compose --profile monitoring up -d --build --wait
+      - name: Check it end to end
+        run: uv run --with httpx python examples/quickstart/check.py --monitoring
+      - name: Logs
+        if: failure()
+        run: docker compose --profile monitoring logs --no-color
+      - name: Down
+        if: always()
+        run: docker compose --profile monitoring down -v
 
   python:
     strategy:
@@ -175,6 +198,18 @@ jobs:
           ./promtool check rules deploy/helm/sentinel-guard/alerts/guard-alerts.yaml deploy/prometheus/alerts.yml
           ./promtool test rules deploy/helm/sentinel-guard/alerts/guard-alerts.test.yaml
           helm template t deploy/helm/sentinel-guard --set prometheusRule.enabled=true | grep -q "kind: PrometheusRule"
+      - name: Guard dashboard (valid JSON; every query names a guard series, and the chart ships it)
+        run: |
+          python3 - <<'PY'
+          import json
+          d = json.load(open("deploy/helm/sentinel-guard/dashboards/sentinel-guard.json"))
+          exprs = [t["expr"] for p in d["panels"] for t in p.get("targets", [])]
+          assert d["uid"] == "sentinel-guard" and exprs, "no queries"
+          bad = [e for e in exprs if "sentinelguard" not in e.lower().replace("_", "")]   # sentinel_guard_* series, SentinelGuard* alerts
+          assert not bad, bad
+          print(f"{len(d['panels'])} panels, {len(exprs)} queries")
+          PY
+          helm template t deploy/helm/sentinel-guard --set grafanaDashboard.enabled=true | grep -q '"uid": "sentinel-guard"'
       - name: Least privilege - who may hold which secret (signing keys only in the gateway)
         run: |
           H=deploy/helm/sentinel

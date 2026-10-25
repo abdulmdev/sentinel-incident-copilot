@@ -42,3 +42,17 @@ metadata:
 spec:
   {{- .Files.Get "alerts/guard-alerts.yaml" | nindent 2 }}
 {{- end }}
+{{- if .Values.grafanaDashboard.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentinel-guard-dashboard
+  namespace: {{ .Values.grafanaDashboard.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "guard.labels" . | nindent 4 }}
+    {{- toYaml .Values.grafanaDashboard.labels | nindent 4 }}
+data:
+  sentinel-guard.json: |-
+    {{- .Files.Get "dashboards/sentinel-guard.json" | nindent 4 }}
+{{- end }}

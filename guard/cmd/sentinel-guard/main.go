@@ -69,16 +69,42 @@ func main() {
 	apiAddr := flag.String("api-addr", env("SENTINEL_GUARD_API_ADDR", ""), "kubernetes mode: also serve the action API (no webhooks) over plain HTTP here, for in-cluster clients")
 	verifyEvery := flag.Duration("verify-interval", envDuration("SENTINEL_GUARD_VERIFY_INTERVAL", 5*time.Minute), "how often each replica verifies the whole audit chain (sentinel_guard_audit_chain_ok)")
 	showVersion := flag.Bool("version", false, "print the version")
+	healthcheck := flag.Bool("healthcheck", false, "probe this guard's /readyz (memory mode, plain HTTP) and exit 0 if ready: for container health checks, as the image has no shell")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
 		return
+	}
+	if *healthcheck {
+		os.Exit(probe(*addr))
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log, *mode, *policyPath, *addr, *apiAddr, *metricsAddr, *namespace, *service, *validating, *mutating, *issuer, *verifyEvery); err != nil {
 		log.Error("sentinel-guard stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+// probe asks a guard listening on addr (default :8080) whether it is ready.
+func probe(addr string) int {
+	if addr == "" {
+		addr = ":8080"
+	}
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	res, err := client.Get("http://" + addr + "/readyz")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "not ready:", err)
+		return 1
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		fmt.Fprintln(os.Stderr, "not ready: HTTP", res.StatusCode)
+		return 1
+	}
+	return 0
 }
 
 func envDuration(key string, def time.Duration) time.Duration {
